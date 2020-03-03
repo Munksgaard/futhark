@@ -14,7 +14,6 @@ module Futhark.Representation.ExplicitMemory.IndexFunction
        , rebase
        , repeat
        , isContiguous
-       , shape
        , rank
        , linearWithOffset
        , rearrangeWithOffset
