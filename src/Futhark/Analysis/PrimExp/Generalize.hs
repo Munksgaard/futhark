@@ -59,7 +59,8 @@ leastGeneralGeneralization m exp1@(FunExp s1 args1 t1) exp2@(FunExp s2 args2 _) 
     return (FunExp s1 (reverse args) t1, m')
   else
     Just $ generalize m exp1 exp2
-leastGeneralGeneralization _ _ _ = Nothing
+leastGeneralGeneralization m exp1 exp2 =
+  Just $ generalize m exp1 exp2
 
 generalize :: Eq v => [(PrimExp v, PrimExp v)] -> PrimExp v -> PrimExp v -> (PrimExp (Ext v), [(PrimExp v, PrimExp v)])
 generalize m exp1 exp2 =
