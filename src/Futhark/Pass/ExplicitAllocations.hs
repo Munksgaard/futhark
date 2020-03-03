@@ -250,7 +250,7 @@ allocsForPattern :: Allocator lore m =>
                        [AllocStm])
 allocsForPattern sizeidents validents rts hints = do
   let sizes' = [ PatElem size $ MemPrim int32 | size <- map identName sizeidents ]
-  (vals, (mems, postbnds)) <-
+  (vals, (exts, mems, postbnds)) <-
     runWriterT $ forM (zip3 validents rts hints) $ \(ident, rt, hint) -> do
       let shape = arrayShape $ identType ident
       case rt of
@@ -264,7 +264,7 @@ allocsForPattern sizeidents validents rts hints = do
 
         MemArray bt _ u (Just (ReturnsInBlock mem extixfun)) -> do
           (patels, ixfn) <- instantiateExtIxFun ident extixfun
-          tell (patels, [])
+          tell (patels, [], [])
 
           return $ PatElem (identName ident) $
             MemArray bt shape u $
@@ -279,16 +279,16 @@ allocsForPattern sizeidents validents rts hints = do
         MemArray bt _ u (Just (ReturnsNewBlock space _ extixfn)) -> do
           -- treat existential index function first
           (patels, ixfn) <- instantiateExtIxFun ident extixfn
-          tell (patels, [])
+          tell (patels, [], [])
 
           memid <- lift $ mkMemIdent ident space
-          tell ([PatElem (identName memid) $ MemMem space], [])
+          tell ([], [PatElem (identName memid) $ MemMem space], [])
           return $ PatElem (identName ident) $ MemArray bt shape u $
             ArrayIn (identName memid) ixfn
 
         _ -> error "Impossible case reached in allocsForPattern!"
 
-  return (sizes' <> mems,
+  return (sizes' <> exts <> mems,
           vals,
           postbnds)
   where knownShape = mapM known . shapeDims
@@ -323,7 +323,7 @@ allocsForPattern sizeidents validents rts hints = do
                     ixfn <- instantiateIxFun $
                             IxFun.substituteInIxFun tab ext_ixfn
                     let patels = zipWith (\nm ptp -> PatElem nm $ MemPrim ptp)
-                                 nms ptps'
+                                 nms' ptps
 
                     return (patels, ixfn)
 
@@ -740,12 +740,12 @@ addResCtxInIfBody :: (Allocable fromlore tolore, Allocator tolore (AllocM fromlo
                      AllocM fromlore tolore (Body tolore, [BodyReturns])
 addResCtxInIfBody ifrets (Body _ bnds res) spaces substs = do
   let num_vals = length ifrets
-      (_, val_res) = splitFromEnd num_vals res
+      (ctx_res, val_res) = splitFromEnd num_vals res
   ((res', bodyrets'), all_body_stms) <- collectStms $ do
     mapM_ addStm bnds
     (val_res', ext_ses_res, mem_ctx_res, bodyrets, total_existentials) <-
-      foldM helper ([], [], [], [], 0) (zip4 ifrets val_res substs spaces)
-    return (ext_ses_res <> mem_ctx_res <> val_res',
+      foldM helper ([], [], [], [], length ctx_res) (zip4 ifrets val_res substs spaces)
+    return (ctx_res <> ext_ses_res <> mem_ctx_res <> val_res',
              -- We need to adjust the ReturnsNewBlock existentials, because they
              -- should always be numbered _after_ all other existentials in the
              -- return values.
