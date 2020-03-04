@@ -308,22 +308,17 @@ allocsForPattern sizeidents validents rts hints = do
               (is, ptps) = unzip $ S.toList $
                             foldMap onlyExts $
                             foldMap leafExpTypes ext_ixfn
-              is' = drop (length sizeidents) is
-              ptps' = drop (length sizeidents) ptps
           if length is /= length ptps
             then error "In allocsForPattern: broken invariant 1!"
-            else do nms <- mapM (\_ -> newVName idnm) is'
-                    -- We need to instantiate with size parameters, but we
-                    -- shouldn't return them at the end
-                    let nms' = map identName sizeidents ++ nms
+            else do nms <- mapM (\_ -> newVName idnm) is
                     let tab = M.fromList $
                           map (\(i, nm, ptp) ->
                                  (Ext i, LeafExp (Free nm) ptp)) $
-                          zip3 is nms' ptps
+                          zip3 is nms ptps
                     ixfn <- instantiateIxFun $
                             IxFun.substituteInIxFun tab ext_ixfn
                     let patels = zipWith (\nm ptp -> PatElem nm $ MemPrim ptp)
-                                 nms' ptps
+                                 nms ptps
 
                     return (patels, ixfn)
 
