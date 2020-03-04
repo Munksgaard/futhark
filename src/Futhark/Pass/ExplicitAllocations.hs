@@ -275,7 +275,6 @@ allocsForPattern sizeidents validents rts hints = do
             summary <- lift $ summaryForBindage (identType ident) hint
             return $ PatElem (identName ident) summary
 
-
         MemArray bt _ u (Just (ReturnsNewBlock space _ extixfn)) -> do
           -- treat existential index function first
           (patels, ixfn) <- instantiateExtIxFun ident extixfn
@@ -300,27 +299,30 @@ allocsForPattern sizeidents validents rts hints = do
           let memname = baseString (identName ident) <> "_mem"
           newIdent memname $ Mem space
 
-        instantiateExtIxFun :: (MonadFreshNames m) =>
+        instantiateExtIxFun :: (MonadFreshNames m, Show d, Show u, Show ret) =>
                               Ident -> ExtIxFun ->
                               m ([PatElemT (MemInfo d u ret)], IxFun)
         instantiateExtIxFun idd ext_ixfn = do
           let idnm = baseString (identName idd) <> "_ixfn"
-              (is, ptps) = unzip $ S.toList $
+              isAndPtps = S.toList $
                             foldMap onlyExts $
                             foldMap leafExpTypes ext_ixfn
-          if length is /= length ptps
-            then error "In allocsForPattern: broken invariant 1!"
-            else do nms <- mapM (\_ -> newVName idnm) is
-                    let tab = M.fromList $
-                          map (\(i, nm, ptp) ->
-                                 (Ext i, LeafExp (Free nm) ptp)) $
-                          zip3 is nms ptps
-                    ixfn <- instantiateIxFun $
-                            IxFun.substituteInIxFun tab ext_ixfn
-                    let patels = zipWith (\nm ptp -> PatElem nm $ MemPrim ptp)
-                                 nms ptps
+          let isAndPtps' = filter (\(i, _) -> i >= length sizeidents) isAndPtps
+          nms <- mapM (\_ -> newVName idnm) isAndPtps'
+          let nms' = map identName sizeidents ++ nms
+          let tab = M.fromList $
+                    map (\((i, ptp), nm) ->
+                            (Ext i, LeafExp (Free nm) ptp)) $
+                    zip isAndPtps nms'
+          ixfn <- instantiateIxFun $
+                  IxFun.substituteInIxFun tab ext_ixfn
 
-                    return (patels, ixfn)
+          -- Without any parameters appearing in sizeidents
+
+          let patels = map (\(nm, (_, ptp)) -> PatElem nm $ MemPrim ptp) $
+                       zip nms isAndPtps'
+
+          return (patels, ixfn)
 
 onlyExts :: (Ext a, PrimType) -> S.Set (Int, PrimType)
 onlyExts (Free _, _) = S.empty
