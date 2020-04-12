@@ -1,26 +1,28 @@
 {-# LANGUAGE QuasiQuotes #-}
+
 -- | Simple C runtime representation.
 module Futhark.CodeGen.Backends.SimpleRepresentation
-  ( tupleField
-  , funName
-  , defaultMemBlockType
-  , primTypeToCType
-  , signedPrimTypeToCType
+  ( tupleField,
+    funName,
+    defaultMemBlockType,
+    primTypeToCType,
+    signedPrimTypeToCType,
 
     -- * Primitive value operations
-  , cIntOps
-  , cFloat32Ops, cFloat32Funs
-  , cFloat64Ops, cFloat64Funs
-  , cFloatConvOps
+    cIntOps,
+    cFloat32Ops,
+    cFloat32Funs,
+    cFloat64Ops,
+    cFloat64Funs,
+    cFloatConvOps,
   )
-  where
-
-import qualified Language.C.Syntax as C
-import qualified Language.C.Quote.C as C
+where
 
 import Futhark.CodeGen.ImpCode
-import Futhark.Util.Pretty (prettyOneLine)
 import Futhark.Util (zEncodeString)
+import Futhark.Util.Pretty (prettyOneLine)
+import qualified Language.C.Quote.C as C
+import qualified Language.C.Syntax as C
 
 -- | The C type corresponding to a signed integer type.
 intTypeToCType :: IntType -> C.Type
@@ -63,7 +65,7 @@ tupleField i = "v" ++ show i
 -- | @funName f@ is the name of the C function corresponding to
 -- the Futhark function @f@.
 funName :: Name -> String
-funName = ("futrts_"++) . zEncodeString . nameToString
+funName = ("futrts_" ++) . zEncodeString . nameToString
 
 funName' :: String -> String
 funName' = funName . nameFromString
@@ -73,78 +75,90 @@ defaultMemBlockType :: C.Type
 defaultMemBlockType = [C.cty|char*|]
 
 cIntOps :: [C.Definition]
-cIntOps = concatMap (`map` [minBound..maxBound]) ops
-          ++ cIntPrimFuns
-  where ops = [mkAdd, mkSub, mkMul,
-               mkUDiv, mkUMod,
-               mkSDiv, mkSMod,
-               mkSQuot, mkSRem,
-               mkSMin, mkUMin,
-               mkSMax, mkUMax,
-               mkShl, mkLShr, mkAShr,
-               mkAnd, mkOr, mkXor,
-               mkUlt, mkUle,  mkSlt, mkSle,
-               mkPow,
-               mkIToB, mkBToI
-              ] ++
-              map mkSExt [minBound..maxBound] ++
-              map mkZExt [minBound..maxBound]
-
-        taggedI s Int8 = s ++ "8"
-        taggedI s Int16 = s ++ "16"
-        taggedI s Int32 = s ++ "32"
-        taggedI s Int64 = s ++ "64"
-
-        -- Use unsigned types for add/sub/mul so we can do
-        -- well-defined overflow.
-        mkAdd = simpleUintOp "add" [C.cexp|x + y|]
-        mkSub = simpleUintOp "sub" [C.cexp|x - y|]
-        mkMul = simpleUintOp "mul" [C.cexp|x * y|]
-        mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
-        mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
-        mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
-        mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
-
-        mkSDiv t =
-          let ct = intTypeToCType t
-          in [C.cedecl|static inline $ty:ct $id:(taggedI "sdiv" t)($ty:ct x, $ty:ct y) {
+cIntOps =
+  concatMap (`map` [minBound .. maxBound]) ops
+    ++ cIntPrimFuns
+  where
+    ops =
+      [ mkAdd,
+        mkSub,
+        mkMul,
+        mkUDiv,
+        mkUMod,
+        mkSDiv,
+        mkSMod,
+        mkSQuot,
+        mkSRem,
+        mkSMin,
+        mkUMin,
+        mkSMax,
+        mkUMax,
+        mkShl,
+        mkLShr,
+        mkAShr,
+        mkAnd,
+        mkOr,
+        mkXor,
+        mkUlt,
+        mkUle,
+        mkSlt,
+        mkSle,
+        mkPow,
+        mkIToB,
+        mkBToI
+      ]
+        ++ map mkSExt [minBound .. maxBound]
+        ++ map mkZExt [minBound .. maxBound]
+    taggedI s Int8 = s ++ "8"
+    taggedI s Int16 = s ++ "16"
+    taggedI s Int32 = s ++ "32"
+    taggedI s Int64 = s ++ "64"
+    -- Use unsigned types for add/sub/mul so we can do
+    -- well-defined overflow.
+    mkAdd = simpleUintOp "add" [C.cexp|x + y|]
+    mkSub = simpleUintOp "sub" [C.cexp|x - y|]
+    mkMul = simpleUintOp "mul" [C.cexp|x * y|]
+    mkUDiv = simpleUintOp "udiv" [C.cexp|x / y|]
+    mkUMod = simpleUintOp "umod" [C.cexp|x % y|]
+    mkUMax = simpleUintOp "umax" [C.cexp|x < y ? y : x|]
+    mkUMin = simpleUintOp "umin" [C.cexp|x < y ? x : y|]
+    mkSDiv t =
+      let ct = intTypeToCType t
+       in [C.cedecl|static inline $ty:ct $id:(taggedI "sdiv" t)($ty:ct x, $ty:ct y) {
                          $ty:ct q = x / y;
                          $ty:ct r = x % y;
                          return q -
                            (((r != 0) && ((r < 0) != (y < 0))) ? 1 : 0);
              }|]
-        mkSMod t =
-          let ct = intTypeToCType t
-          in [C.cedecl|static inline $ty:ct $id:(taggedI "smod" t)($ty:ct x, $ty:ct y) {
+    mkSMod t =
+      let ct = intTypeToCType t
+       in [C.cedecl|static inline $ty:ct $id:(taggedI "smod" t)($ty:ct x, $ty:ct y) {
                          $ty:ct r = x % y;
                          return r +
                            ((r == 0 || (x > 0 && y > 0) || (x < 0 && y < 0)) ? 0 : y);
               }|]
-
-        mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
-        mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
-        mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
-        mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
-        mkShl = simpleUintOp "shl" [C.cexp|x << y|]
-        mkLShr = simpleUintOp "lshr" [C.cexp|x >> y|]
-        mkAShr = simpleIntOp "ashr" [C.cexp|x >> y|]
-        mkAnd = simpleUintOp "and" [C.cexp|x & y|]
-        mkOr = simpleUintOp "or" [C.cexp|x | y|]
-        mkXor = simpleUintOp "xor" [C.cexp|x ^ y|]
-        mkUlt = uintCmpOp "ult" [C.cexp|x < y|]
-        mkUle = uintCmpOp "ule" [C.cexp|x <= y|]
-        mkSlt = intCmpOp "slt" [C.cexp|x < y|]
-        mkSle = intCmpOp "sle" [C.cexp|x <= y|]
-
-        -- We define some operations as macros rather than functions,
-        -- because this allows us to use them as constant expressions
-        -- in things like array sizes and static initialisers.
-        macro name rhs =
-          [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
-
-        mkPow t =
-          let ct = intTypeToCType t
-          in [C.cedecl|static inline $ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
+    mkSQuot = simpleIntOp "squot" [C.cexp|x / y|]
+    mkSRem = simpleIntOp "srem" [C.cexp|x % y|]
+    mkSMax = simpleIntOp "smax" [C.cexp|x < y ? y : x|]
+    mkSMin = simpleIntOp "smin" [C.cexp|x < y ? x : y|]
+    mkShl = simpleUintOp "shl" [C.cexp|x << y|]
+    mkLShr = simpleUintOp "lshr" [C.cexp|x >> y|]
+    mkAShr = simpleIntOp "ashr" [C.cexp|x >> y|]
+    mkAnd = simpleUintOp "and" [C.cexp|x & y|]
+    mkOr = simpleUintOp "or" [C.cexp|x | y|]
+    mkXor = simpleUintOp "xor" [C.cexp|x ^ y|]
+    mkUlt = uintCmpOp "ult" [C.cexp|x < y|]
+    mkUle = uintCmpOp "ule" [C.cexp|x <= y|]
+    mkSlt = intCmpOp "slt" [C.cexp|x < y|]
+    mkSle = intCmpOp "sle" [C.cexp|x <= y|]
+    -- We define some operations as macros rather than functions,
+    -- because this allows us to use them as constant expressions
+    -- in things like array sizes and static initialisers.
+    macro name rhs =
+      [C.cedecl|$esc:("#define " ++ name ++ "(x) (" ++ prettyOneLine rhs ++ ")")|]
+    mkPow t =
+      let ct = intTypeToCType t
+       in [C.cedecl|static inline $ty:ct $id:(taggedI "pow" t)($ty:ct x, $ty:ct y) {
                          $ty:ct res = 1, rem = y;
                          while (rem != 0) {
                            if (rem & 1) {
@@ -155,43 +169,46 @@ cIntOps = concatMap (`map` [minBound..maxBound]) ops
                          }
                          return res;
               }|]
-
-        mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
-          where name = "sext_"++pretty from_t++"_"++pretty to_t
-                from_ct = intTypeToCType from_t
-                to_ct = intTypeToCType to_t
-
-        mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
-          where name = "zext_"++pretty from_t++"_"++pretty to_t
-                from_ct = uintTypeToCType from_t
-                to_ct = uintTypeToCType to_t
-
-        mkBToI to_t =
-          [C.cedecl|static inline $ty:to_ct
+    mkSExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+      where
+        name = "sext_" ++ pretty from_t ++ "_" ++ pretty to_t
+        from_ct = intTypeToCType from_t
+        to_ct = intTypeToCType to_t
+    mkZExt from_t to_t = macro name [C.cexp|($ty:to_ct)(($ty:from_ct)x)|]
+      where
+        name = "zext_" ++ pretty from_t ++ "_" ++ pretty to_t
+        from_ct = uintTypeToCType from_t
+        to_ct = uintTypeToCType to_t
+    mkBToI to_t =
+      [C.cedecl|static inline $ty:to_ct
                     $id:name($ty:from_ct x) { return x; } |]
-          where name = "btoi_bool_"++pretty to_t
-                from_ct = primTypeToCType Bool
-                to_ct = intTypeToCType to_t
-
-        mkIToB from_t =
-          [C.cedecl|static inline $ty:to_ct
+      where
+        name = "btoi_bool_" ++ pretty to_t
+        from_ct = primTypeToCType Bool
+        to_ct = intTypeToCType to_t
+    mkIToB from_t =
+      [C.cedecl|static inline $ty:to_ct
                     $id:name($ty:from_ct x) { return x; } |]
-          where name = "itob_"++pretty from_t++"_bool"
-                to_ct = primTypeToCType Bool
-                from_ct = intTypeToCType from_t
-
-        simpleUintOp s e t =
-          [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = uintTypeToCType t
-        simpleIntOp s e t =
-          [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = intTypeToCType t
-        intCmpOp s e t =
-          [C.cedecl|static inline typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = intTypeToCType t
-        uintCmpOp s e t =
-          [C.cedecl|static inline typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = uintTypeToCType t
+      where
+        name = "itob_" ++ pretty from_t ++ "_bool"
+        to_ct = primTypeToCType Bool
+        from_ct = intTypeToCType from_t
+    simpleUintOp s e t =
+      [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+      where
+        ct = uintTypeToCType t
+    simpleIntOp s e t =
+      [C.cedecl|static inline $ty:ct $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+      where
+        ct = intTypeToCType t
+    intCmpOp s e t =
+      [C.cedecl|static inline typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+      where
+        ct = intTypeToCType t
+    uintCmpOp s e t =
+      [C.cedecl|static inline typename bool $id:(taggedI s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+      where
+        ct = uintTypeToCType t
 
 cIntPrimFuns :: [C.Definition]
 cIntPrimFuns =
@@ -406,59 +423,63 @@ $esc:("#endif")
                 |]
 
 cFloat32Ops :: [C.Definition]
+
 cFloat64Ops :: [C.Definition]
+
 cFloatConvOps :: [C.Definition]
 (cFloat32Ops, cFloat64Ops, cFloatConvOps) =
-  ( map ($Float32) mkOps
-  , map ($Float64) mkOps
-  , [ mkFPConvFF "fpconv" from to |
-      from <- [minBound..maxBound],
-      to <- [minBound..maxBound] ])
-  where taggedF s Float32 = s ++ "32"
-        taggedF s Float64 = s ++ "64"
-        convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
-
-        mkOps = [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe] ++
-                map (mkFPConvIF "sitofp") [minBound..maxBound] ++
-                map (mkFPConvUF "uitofp") [minBound..maxBound] ++
-                map (flip $ mkFPConvFI "fptosi") [minBound..maxBound] ++
-                map (flip $ mkFPConvFU "fptoui") [minBound..maxBound]
-
-        mkFDiv = simpleFloatOp "fdiv" [C.cexp|x / y|]
-        mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
-        mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
-        mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
-        mkFMin = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
-        mkFMax = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
-        mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
-        mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
-
-        mkPow Float32 =
-          [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
-        mkPow Float64 =
-          [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
-
-        mkFPConv from_f to_f s from_t to_t =
-          [C.cedecl|static inline $ty:to_ct
+  ( map ($ Float32) mkOps,
+    map ($ Float64) mkOps,
+    [ mkFPConvFF "fpconv" from to
+      | from <- [minBound .. maxBound],
+        to <- [minBound .. maxBound]
+    ]
+  )
+  where
+    taggedF s Float32 = s ++ "32"
+    taggedF s Float64 = s ++ "64"
+    convOp s from to = s ++ "_" ++ pretty from ++ "_" ++ pretty to
+    mkOps =
+      [mkFDiv, mkFAdd, mkFSub, mkFMul, mkFMin, mkFMax, mkPow, mkCmpLt, mkCmpLe]
+        ++ map (mkFPConvIF "sitofp") [minBound .. maxBound]
+        ++ map (mkFPConvUF "uitofp") [minBound .. maxBound]
+        ++ map (flip $ mkFPConvFI "fptosi") [minBound .. maxBound]
+        ++ map (flip $ mkFPConvFU "fptoui") [minBound .. maxBound]
+    mkFDiv = simpleFloatOp "fdiv" [C.cexp|x / y|]
+    mkFAdd = simpleFloatOp "fadd" [C.cexp|x + y|]
+    mkFSub = simpleFloatOp "fsub" [C.cexp|x - y|]
+    mkFMul = simpleFloatOp "fmul" [C.cexp|x * y|]
+    mkFMin = simpleFloatOp "fmin" [C.cexp|fmin(x, y)|]
+    mkFMax = simpleFloatOp "fmax" [C.cexp|fmax(x, y)|]
+    mkCmpLt = floatCmpOp "cmplt" [C.cexp|x < y|]
+    mkCmpLe = floatCmpOp "cmple" [C.cexp|x <= y|]
+    mkPow Float32 =
+      [C.cedecl|static inline float fpow32(float x, float y) { return pow(x, y); }|]
+    mkPow Float64 =
+      [C.cedecl|static inline double fpow64(double x, double y) { return pow(x, y); }|]
+    mkFPConv from_f to_f s from_t to_t =
+      [C.cedecl|static inline $ty:to_ct
                     $id:(convOp s from_t to_t)($ty:from_ct x) { return ($ty:to_ct)x;} |]
-          where from_ct = from_f from_t
-                to_ct = to_f to_t
-
-        mkFPConvFF = mkFPConv floatTypeToCType floatTypeToCType
-        mkFPConvFI = mkFPConv floatTypeToCType intTypeToCType
-        mkFPConvIF = mkFPConv intTypeToCType floatTypeToCType
-        mkFPConvFU = mkFPConv floatTypeToCType uintTypeToCType
-        mkFPConvUF = mkFPConv uintTypeToCType floatTypeToCType
-
-        simpleFloatOp s e t =
-          [C.cedecl|static inline $ty:ct $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = floatTypeToCType t
-        floatCmpOp s e t =
-          [C.cedecl|static inline typename bool $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
-            where ct = floatTypeToCType t
+      where
+        from_ct = from_f from_t
+        to_ct = to_f to_t
+    mkFPConvFF = mkFPConv floatTypeToCType floatTypeToCType
+    mkFPConvFI = mkFPConv floatTypeToCType intTypeToCType
+    mkFPConvIF = mkFPConv intTypeToCType floatTypeToCType
+    mkFPConvFU = mkFPConv floatTypeToCType uintTypeToCType
+    mkFPConvUF = mkFPConv uintTypeToCType floatTypeToCType
+    simpleFloatOp s e t =
+      [C.cedecl|static inline $ty:ct $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+      where
+        ct = floatTypeToCType t
+    floatCmpOp s e t =
+      [C.cedecl|static inline typename bool $id:(taggedF s t)($ty:ct x, $ty:ct y) { return $exp:e; }|]
+      where
+        ct = floatTypeToCType t
 
 cFloat32Funs :: [C.Definition]
-cFloat32Funs = [C.cunit|
+cFloat32Funs =
+  [C.cunit|
     static inline float $id:(funName' "log32")(float x) {
       return log(x);
     }
@@ -613,7 +634,8 @@ $esc:("#endif")
 |]
 
 cFloat64Funs :: [C.Definition]
-cFloat64Funs = [C.cunit|
+cFloat64Funs =
+  [C.cunit|
     static inline double $id:(funName' "log64")(double x) {
       return log(x);
     }

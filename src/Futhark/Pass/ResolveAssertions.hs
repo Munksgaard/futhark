@@ -3,36 +3,35 @@
 --
 -- Currently implemented by running the simplifier with a special rule
 -- that is too expensive to run all the time.
-
 module Futhark.Pass.ResolveAssertions
-  ( resolveAssertions
+  ( resolveAssertions,
   )
-  where
+where
 
 import Data.Maybe
 import Data.Monoid
-
-import qualified Futhark.Analysis.SymbolTable as ST
-import Futhark.Optimise.Simplify.Rule
 import qualified Futhark.Analysis.AlgSimplify as AS
-import qualified Futhark.Analysis.ScalExp as SE
 import Futhark.Analysis.PrimExp.Convert
-import Futhark.Representation.AST.Syntax
+import qualified Futhark.Analysis.ScalExp as SE
+import qualified Futhark.Analysis.SymbolTable as ST
 import Futhark.Construct
+import qualified Futhark.Optimise.Simplify as Simplify
+import Futhark.Optimise.Simplify.Rule
 import Futhark.Pass
+import Futhark.Representation.AST.Syntax
 import Futhark.Representation.SOACS (SOACS)
 import qualified Futhark.Representation.SOACS.Simplify as Simplify
-import qualified Futhark.Optimise.Simplify as Simplify
-
 import Prelude
 
 -- | The assertion-resolver pass.
 resolveAssertions :: Pass SOACS SOACS
-resolveAssertions = Pass
-  "resolve assertions"
-  "Try to statically resolve bounds checks and similar." $
-  Simplify.simplifyProg Simplify.simpleSOACS rulebook Simplify.noExtraHoistBlockers
-  where rulebook = Simplify.soacRules <> ruleBook [ RuleBasicOp simplifyScalExp ] []
+resolveAssertions =
+  Pass
+    "resolve assertions"
+    "Try to statically resolve bounds checks and similar."
+    $ Simplify.simplifyProg Simplify.simpleSOACS rulebook Simplify.noExtraHoistBlockers
+  where
+    rulebook = Simplify.soacRules <> ruleBook [RuleBasicOp simplifyScalExp] []
 
 simplifyScalExp :: BinderOps lore => TopDownRuleBasicOp lore
 simplifyScalExp vtable pat _ e = Simplify $ do
@@ -46,18 +45,16 @@ simplifyScalExp vtable pat _ e = Simplify $ do
         Just se' <- valOrVar $ AS.simplify se ranges ->
         letBind_ pat $ BasicOp $ SubExp se'
     _ -> cannotSimplify
-  where ranges = ST.rangesRep vtable
-        size_bound = 10 -- don't touch scalexps bigger than this.
-
-        valOrVar (SE.Val v)  = Just $ Constant v
-        valOrVar (SE.Id v _) = Just $ Var v
-        valOrVar _           = Nothing
-
-        interesting CmpOp{} = True
-        interesting (BinOp LogAnd _ _) = True
-        interesting (BinOp LogOr _ _) = True
-        interesting (BinOp _ x y) = isConst x || isConst y
-        interesting _ = False
-
-        isConst Constant{} = True
-        isConst Var{} = False
+  where
+    ranges = ST.rangesRep vtable
+    size_bound = 10 -- don't touch scalexps bigger than this.
+    valOrVar (SE.Val v) = Just $ Constant v
+    valOrVar (SE.Id v _) = Just $ Var v
+    valOrVar _ = Nothing
+    interesting CmpOp {} = True
+    interesting (BinOp LogAnd _ _) = True
+    interesting (BinOp LogOr _ _) = True
+    interesting (BinOp _ x y) = isConst x || isConst y
+    interesting _ = False
+    isConst Constant {} = True
+    isConst Var {} = False

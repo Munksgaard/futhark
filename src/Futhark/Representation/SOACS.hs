@@ -1,44 +1,56 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+
 -- | A simple representation with SOACs and nested parallelism.
 module Futhark.Representation.SOACS
-       ( -- * The Lore definition
-         SOACS
-         -- * Syntax types
-       , Body
-       , Stm
-       , Pattern
-       , BasicOp
-       , Exp
-       , Lambda
-       , FParam
-       , LParam
-       , RetType
-       , PatElem
-         -- * Module re-exports
-       , module Futhark.Representation.AST.Attributes
-       , module Futhark.Representation.AST.Traversals
-       , module Futhark.Representation.AST.Pretty
-       , module Futhark.Representation.AST.Syntax
-       , module Futhark.Representation.SOACS.SOAC
-       , AST.LambdaT(Lambda)
-       , AST.BodyT(Body)
-       , AST.PatternT(Pattern)
-       , AST.PatElemT(PatElem)
-       , AST.ExpT(BasicOp)
-       )
+  ( -- * The Lore definition
+    SOACS,
+
+    -- * Syntax types
+    Body,
+    Stm,
+    Pattern,
+    BasicOp,
+    Exp,
+    Lambda,
+    FParam,
+    LParam,
+    RetType,
+    PatElem,
+
+    -- * Module re-exports
+    module Futhark.Representation.AST.Attributes,
+    module Futhark.Representation.AST.Traversals,
+    module Futhark.Representation.AST.Pretty,
+    module Futhark.Representation.AST.Syntax,
+    module Futhark.Representation.SOACS.SOAC,
+    AST.LambdaT (Lambda),
+    AST.BodyT (Body),
+    AST.PatternT (Pattern),
+    AST.PatElemT (PatElem),
+    AST.ExpT (BasicOp),
+  )
 where
 
-import qualified Futhark.Representation.AST.Syntax as AST
-import Futhark.Representation.AST.Syntax
-  hiding (BasicOp, Exp, Body, Stm,
-          Pattern, Lambda, FParam, LParam, RetType, PatElem)
-import Futhark.Representation.SOACS.SOAC
-import Futhark.Representation.AST.Attributes
-import Futhark.Representation.AST.Traversals
-import Futhark.Representation.AST.Pretty
 import Futhark.Binder
 import Futhark.Construct
+import Futhark.Representation.AST.Attributes
+import Futhark.Representation.AST.Pretty
+import qualified Futhark.Representation.AST.Syntax as AST
+import Futhark.Representation.AST.Syntax hiding
+  ( BasicOp,
+    Body,
+    Exp,
+    FParam,
+    LParam,
+    Lambda,
+    PatElem,
+    Pattern,
+    RetType,
+    Stm,
+  )
+import Futhark.Representation.AST.Traversals
+import Futhark.Representation.SOACS.SOAC
 import qualified Futhark.TypeCheck as TypeCheck
 
 -- This module could be written much nicer if Haskell had functors
@@ -55,20 +67,29 @@ instance Attributes SOACS where
   expTypesFromPattern = return . expExtTypesFromPattern
 
 type BasicOp = AST.BasicOp SOACS
+
 type Exp = AST.Exp SOACS
+
 type Body = AST.Body SOACS
+
 type Stm = AST.Stm SOACS
+
 type Pattern = AST.Pattern SOACS
+
 type Lambda = AST.Lambda SOACS
+
 type FParam = AST.FParam SOACS
+
 type LParam = AST.LParam SOACS
+
 type RetType = AST.RetType SOACS
+
 type PatElem = AST.PatElem SOACS
 
 instance TypeCheck.CheckableOp SOACS where
   checkOp = typeCheckSOAC
 
-instance TypeCheck.Checkable SOACS where
+instance TypeCheck.Checkable SOACS
 
 instance Bindable SOACS where
   mkBody = AST.Body ()
@@ -81,4 +102,4 @@ instance BinderOps SOACS where
   mkBodyB = bindableMkBodyB
   mkLetNamesB = bindableMkLetNamesB
 
-instance PrettyLore SOACS where
+instance PrettyLore SOACS

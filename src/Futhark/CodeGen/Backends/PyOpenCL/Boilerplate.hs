@@ -1,22 +1,28 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TemplateHaskell #-}
+
 module Futhark.CodeGen.Backends.PyOpenCL.Boilerplate
-  ( openClInit
-  , openClPrelude
-  ) where
+  ( openClInit,
+    openClPrelude,
+  )
+where
 
 import Data.FileEmbed
 import qualified Data.Map as M
 import qualified Data.Text as T
-import NeatInterpolation (text)
-
-import Futhark.CodeGen.ImpCode.OpenCL
-  (PrimType(..), SizeClass(..),
-   FailureMsg(..), ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
-import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.CodeGen.Backends.GenericPython.AST
+import Futhark.CodeGen.ImpCode.OpenCL
+  ( ErrorMsg (..),
+    ErrorMsgPart (..),
+    FailureMsg (..),
+    PrimType (..),
+    SizeClass (..),
+    errorMsgArgTypes,
+  )
+import Futhark.CodeGen.OpenCL.Heuristics
 import Futhark.Util.Pretty (prettyText)
+import NeatInterpolation (text)
 
 errorMsgNumArgs :: ErrorMsg a -> Int
 errorMsgNumArgs = length . errorMsgArgTypes
@@ -29,7 +35,9 @@ openClPrelude = $(embedStringFile "rts/python/opencl.py")
 -- @initiatialize_opencl_object@ procedure.  Should be put in the
 -- class constructor.
 openClInit :: [PrimType] -> String -> M.Map Name SizeClass -> [FailureMsg] -> String
-openClInit types assign sizes failures = T.unpack [text|
+openClInit types assign sizes failures =
+  T.unpack
+    [text|
 size_heuristics=$size_heuristics
 self.global_failure_args_max = $max_num_args
 self.failure_msgs=$failure_msgs
@@ -49,50 +57,58 @@ program = initialise_opencl_object(self,
                                    all_sizes=$sizes')
 $assign'
 |]
-  where assign' = T.pack assign
-        size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
-        types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
-        sizes' = prettyText $ sizeClassesToPython sizes
-        max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
-        failure_msgs = prettyText $ List $ map formatFailure failures
+  where
+    assign' = T.pack assign
+    size_heuristics = prettyText $ sizeHeuristicsToPython sizeHeuristicsTable
+    types' = prettyText $ map (show . pretty) types -- Looks enough like Python.
+    sizes' = prettyText $ sizeClassesToPython sizes
+    max_num_args = prettyText $ foldl max 0 $ map (errorMsgNumArgs . failureError) failures
+    failure_msgs = prettyText $ List $ map formatFailure failures
 
 formatFailure :: FailureMsg -> PyExp
 formatFailure (FailureMsg (ErrorMsg parts) backtrace) =
   String $ concatMap onPart parts ++ "\n" ++ formatEscape backtrace
-  where formatEscape = let escapeChar '{' = "{{"
-                           escapeChar '}' = "}}"
-                           escapeChar c = [c]
-                       in concatMap escapeChar
-
-        onPart (ErrorString s) = formatEscape s
-        onPart ErrorInt32{} = "{}"
+  where
+    formatEscape =
+      let escapeChar '{' = "{{"
+          escapeChar '}' = "}}"
+          escapeChar c = [c]
+       in concatMap escapeChar
+    onPart (ErrorString s) = formatEscape s
+    onPart ErrorInt32 {} = "{}"
 
 sizeClassesToPython :: M.Map Name SizeClass -> PyExp
 sizeClassesToPython = Dict . map f . M.toList
-  where f (size_name, size_class) =
-          (String $ pretty size_name,
-           Dict [(String "class", String $ pretty size_class),
-                 (String "value", defValue size_class)])
-        defValue (SizeBespoke _ x) = Integer $ toInteger x
-        defValue _ = None
+  where
+    f (size_name, size_class) =
+      ( String $ pretty size_name,
+        Dict
+          [ (String "class", String $ pretty size_class),
+            (String "value", defValue size_class)
+          ]
+      )
+    defValue (SizeBespoke _ x) = Integer $ toInteger x
+    defValue _ = None
 
 sizeHeuristicsToPython :: [SizeHeuristic] -> PyExp
 sizeHeuristicsToPython = List . map f
-  where f (SizeHeuristic platform_name device_type which what) =
-          Tuple [String platform_name,
-                 clDeviceType device_type,
-                 which',
-                 what']
-
-          where clDeviceType DeviceGPU = Var "cl.device_type.GPU"
-                clDeviceType DeviceCPU = Var "cl.device_type.CPU"
-
-                which' = case which of LockstepWidth -> String "lockstep_width"
-                                       NumGroups     -> String "num_groups"
-                                       GroupSize     -> String "group_size"
-                                       TileSize      -> String "tile_size"
-                                       Threshold     -> String "threshold"
-
-                what' = case what of
-                          HeuristicConst x -> Integer $ toInteger x
-                          HeuristicDeviceInfo s -> String s
+  where
+    f (SizeHeuristic platform_name device_type which what) =
+      Tuple
+        [ String platform_name,
+          clDeviceType device_type,
+          which',
+          what'
+        ]
+      where
+        clDeviceType DeviceGPU = Var "cl.device_type.GPU"
+        clDeviceType DeviceCPU = Var "cl.device_type.CPU"
+        which' = case which of
+          LockstepWidth -> String "lockstep_width"
+          NumGroups -> String "num_groups"
+          GroupSize -> String "group_size"
+          TileSize -> String "tile_size"
+          Threshold -> String "threshold"
+        what' = case what of
+          HeuristicConst x -> Integer $ toInteger x
+          HeuristicDeviceInfo s -> String s

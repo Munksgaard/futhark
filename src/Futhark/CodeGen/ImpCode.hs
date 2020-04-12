@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TupleSections #-}
+
 -- | Imperative intermediate language used as a stepping stone in code generation.
 --
 -- This is a generic representation parametrised on an extensible
@@ -8,72 +9,78 @@
 -- Originally inspired by the paper "Defunctionalizing Push Arrays"
 -- (FHPC '14).
 module Futhark.CodeGen.ImpCode
-  ( Functions (..)
-  , Function
-  , FunctionT (..)
-  , ValueDesc (..)
-  , Signedness (..)
-  , ExternalValue (..)
-  , Param (..)
-  , paramName
-  , SubExp(..)
-  , MemSize
-  , DimSize
-  , Type (..)
-  , Space (..)
-  , SpaceId
-  , Code (..)
-  , PrimValue (..)
-  , ExpLeaf (..)
-  , Exp
-  , Volatility (..)
-  , Arg (..)
-  , var
-  , vi32
-  , index
-  , ErrorMsg(..)
-  , ErrorMsgPart(..)
-  , errorMsgArgTypes
-  , ArrayContents(..)
+  ( Functions (..),
+    Function,
+    FunctionT (..),
+    ValueDesc (..),
+    Signedness (..),
+    ExternalValue (..),
+    Param (..),
+    paramName,
+    SubExp (..),
+    MemSize,
+    DimSize,
+    Type (..),
+    Space (..),
+    SpaceId,
+    Code (..),
+    PrimValue (..),
+    ExpLeaf (..),
+    Exp,
+    Volatility (..),
+    Arg (..),
+    var,
+    vi32,
+    index,
+    ErrorMsg (..),
+    ErrorMsgPart (..),
+    errorMsgArgTypes,
+    ArrayContents (..),
 
     -- * Typed enumerations
-  , Bytes
-  , Elements
-  , elements
-  , bytes
-  , withElemType
+    Bytes,
+    Elements,
+    elements,
+    bytes,
+    withElemType,
 
     -- * Re-exports from other modules.
-  , module Language.Futhark.Core
-  , module Futhark.Representation.Primitive
-  , module Futhark.Analysis.PrimExp
-  , module Futhark.Representation.Kernels.Sizes
+    module Language.Futhark.Core,
+    module Futhark.Representation.Primitive,
+    module Futhark.Analysis.PrimExp,
+    module Futhark.Representation.Kernels.Sizes,
   )
-  where
+where
 
 import Data.List (intersperse)
 import Data.Loc
 import Data.Traversable
-
-import Language.Futhark.Core
-import Futhark.Representation.Primitive
-import Futhark.Representation.AST.Syntax
-  (SubExp(..), Space(..), SpaceId,
-   ErrorMsg(..), ErrorMsgPart(..), errorMsgArgTypes)
+import Futhark.Analysis.PrimExp
 import Futhark.Representation.AST.Attributes.Names
 import Futhark.Representation.AST.Pretty ()
-import Futhark.Analysis.PrimExp
+import Futhark.Representation.AST.Syntax
+  ( ErrorMsg (..),
+    ErrorMsgPart (..),
+    Space (..),
+    SpaceId,
+    SubExp (..),
+    errorMsgArgTypes,
+  )
+import Futhark.Representation.Kernels.Sizes (Count (..))
+import Futhark.Representation.Primitive
 import Futhark.Util.Pretty hiding (space)
-import Futhark.Representation.Kernels.Sizes (Count(..))
+import Language.Futhark.Core
 
 type MemSize = SubExp
+
 type DimSize = SubExp
 
 data Type = Scalar PrimType | Mem Space
 
-data Param = MemParam VName Space
-           | ScalarParam VName PrimType
-             deriving (Show)
+data Param
+  = MemParam VName Space
+  | ScalarParam VName PrimType
+  deriving (Show)
 
 paramName :: Param -> VName
 paramName (MemParam name _) = name
@@ -88,40 +95,45 @@ instance Semigroup (Functions a) where
 instance Monoid (Functions a) where
   mempty = Functions []
 
-data Signedness = TypeUnsigned
-                | TypeDirect
-                deriving (Eq, Show)
+data Signedness
+  = TypeUnsigned
+  | TypeDirect
+  deriving (Eq, Show)
 
 -- | A description of an externally meaningful value.
-data ValueDesc = ArrayValue VName Space PrimType Signedness [DimSize]
-               -- ^ An array with memory block, memory block size,
-               -- memory space, element type, signedness of element
-               -- type (if applicable), and shape.
-               | ScalarValue PrimType Signedness VName
-               -- ^ A scalar value with signedness if applicable.
-               deriving (Eq, Show)
+data ValueDesc
+  = -- | An array with memory block, memory block size,
+    -- memory space, element type, signedness of element
+    -- type (if applicable), and shape.
+    ArrayValue VName Space PrimType Signedness [DimSize]
+  | -- | A scalar value with signedness if applicable.
+    ScalarValue PrimType Signedness VName
+  deriving (Eq, Show)
 
 -- | ^ An externally visible value.  This can be an opaque value
 -- (covering several physical internal values), or a single value that
 -- can be used externally.
-data ExternalValue = OpaqueValue String [ValueDesc]
-                     -- ^ The string is a human-readable description
-                     -- with no other semantics.
-                   | TransparentValue ValueDesc
-                 deriving (Show)
+data ExternalValue
+  = -- | The string is a human-readable description
+    -- with no other semantics.
+    OpaqueValue String [ValueDesc]
+  | TransparentValue ValueDesc
+  deriving (Show)
 
 -- | A imperative function, containing the body as well as its
 -- low-level inputs and outputs, as well as its high-level arguments
 -- and results.  The latter are only used if the function is an entry
 -- point.
-data FunctionT a = Function { functionEntry :: Bool
-                            , functionOutput :: [Param]
-                            , functionInput :: [Param]
-                            , functionBody :: Code a
-                            , functionResult :: [ExternalValue]
-                            , functionArgs :: [ExternalValue]
-                            }
-                 deriving (Show)
+data FunctionT a
+  = Function
+      { functionEntry :: Bool,
+        functionOutput :: [Param],
+        functionInput :: [Param],
+        functionBody :: Code a,
+        functionResult :: [ExternalValue],
+        functionArgs :: [ExternalValue]
+      }
+  deriving (Show)
 
 -- | Type alias for namespace control.
 type Function = FunctionT
@@ -129,85 +141,89 @@ type Function = FunctionT
 -- | The contents of a statically declared constant array.  Such
 -- arrays are always unidimensional, and reshaped if necessary in the
 -- code that uses them.
-data ArrayContents = ArrayValues [PrimValue]
-                     -- ^ Precisely these values.
-                   | ArrayZeros Int
-                     -- ^ This many zeroes.
-                     deriving (Show)
+data ArrayContents
+  = -- | Precisely these values.
+    ArrayValues [PrimValue]
+  | -- | This many zeroes.
+    ArrayZeros Int
+  deriving (Show)
 
-data Code a = Skip
-            | Code a :>>: Code a
-            | For VName IntType Exp (Code a)
-            | While Exp (Code a)
-            | DeclareMem VName Space
-            | DeclareScalar VName Volatility PrimType
-            | DeclareArray VName Space PrimType ArrayContents
-              -- ^ Create an array containing the given values.  The
-              -- lifetime of the array will be the entire application.
-              -- This is mostly used for constant arrays, but also for
-              -- some bookkeeping data, like the synchronisation
-              -- counts used to implement reduction.
-            | Allocate VName (Count Bytes Exp) Space
-              -- ^ Memory space must match the corresponding
-              -- 'DeclareMem'.
-            | Free VName Space
-              -- ^ Indicate that some memory block will never again be
-              -- referenced via the indicated variable.  However, it
-              -- may still be accessed through aliases.  It is only
-              -- safe to actually deallocate the memory block if this
-              -- is the last reference.  There is no guarantee that
-              -- all memory blocks will be freed with this statement.
-              -- Backends are free to ignore it entirely.
-            | Copy VName (Count Bytes Exp) Space VName (Count Bytes Exp) Space (Count Bytes Exp)
-              -- ^ Destination, offset in destination, destination
-              -- space, source, offset in source, offset space, number
-              -- of bytes.
-            | Write VName (Count Elements Exp) PrimType Space Volatility Exp
-            | SetScalar VName Exp
-            | SetMem VName VName Space
-              -- ^ Must be in same space.
-            | Call [VName] Name [Arg]
-            | If Exp (Code a) (Code a)
-            | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
-            | Comment String (Code a)
-              -- ^ Has the same semantics as the contained code, but
-              -- the comment should show up in generated code for ease
-              -- of inspection.
-            | DebugPrint String (Maybe Exp)
-              -- ^ Print the given value to the screen, somehow
-              -- annotated with the given string as a description.  If
-              -- no type/value pair, just print the string.  This has
-              -- no semantic meaning, but is used entirely for
-              -- debugging.  Code generators are free to ignore this
-              -- statement.
-            | Op a
-            deriving (Show)
+data Code a
+  = Skip
+  | Code a :>>: Code a
+  | For VName IntType Exp (Code a)
+  | While Exp (Code a)
+  | DeclareMem VName Space
+  | DeclareScalar VName Volatility PrimType
+  | -- | Create an array containing the given values.  The
+    -- lifetime of the array will be the entire application.
+    -- This is mostly used for constant arrays, but also for
+    -- some bookkeeping data, like the synchronisation
+    -- counts used to implement reduction.
+    DeclareArray VName Space PrimType ArrayContents
+  | -- | Memory space must match the corresponding
+    -- 'DeclareMem'.
+    Allocate VName (Count Bytes Exp) Space
+  | -- | Indicate that some memory block will never again be
+    -- referenced via the indicated variable.  However, it
+    -- may still be accessed through aliases.  It is only
+    -- safe to actually deallocate the memory block if this
+    -- is the last reference.  There is no guarantee that
+    -- all memory blocks will be freed with this statement.
+    -- Backends are free to ignore it entirely.
+    Free VName Space
+  | -- | Destination, offset in destination, destination
+    -- space, source, offset in source, offset space, number
+    -- of bytes.
+    Copy VName (Count Bytes Exp) Space VName (Count Bytes Exp) Space (Count Bytes Exp)
+  | Write VName (Count Elements Exp) PrimType Space Volatility Exp
+  | SetScalar VName Exp
+  | -- | Must be in same space.
+    SetMem VName VName Space
+  | Call [VName] Name [Arg]
+  | If Exp (Code a) (Code a)
+  | Assert Exp (ErrorMsg Exp) (SrcLoc, [SrcLoc])
+  | -- | Has the same semantics as the contained code, but
+    -- the comment should show up in generated code for ease
+    -- of inspection.
+    Comment String (Code a)
+  | -- | Print the given value to the screen, somehow
+    -- annotated with the given string as a description.  If
+    -- no type/value pair, just print the string.  This has
+    -- no semantic meaning, but is used entirely for
+    -- debugging.  Code generators are free to ignore this
+    -- statement.
+    DebugPrint String (Maybe Exp)
+  | Op a
+  deriving (Show)
 
 -- | The volatility of a memory access or variable.  Feel free to
 -- ignore this for backends where it makes no sense (anything but C
 -- and similar low-level things)
 data Volatility = Volatile | Nonvolatile
-                deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show)
 
 instance Semigroup (Code a) where
-  Skip <> y    = y
-  x    <> Skip = x
-  x    <> y    = x :>>: y
+  Skip <> y = y
+  x <> Skip = x
+  x <> y = x :>>: y
 
 instance Monoid (Code a) where
   mempty = Skip
 
-data ExpLeaf = ScalarVar VName
-             | SizeOf PrimType
-             | Index VName (Count Elements Exp) PrimType Space Volatility
-           deriving (Eq, Show)
+data ExpLeaf
+  = ScalarVar VName
+  | SizeOf PrimType
+  | Index VName (Count Elements Exp) PrimType Space Volatility
+  deriving (Eq, Show)
 
 type Exp = PrimExp ExpLeaf
 
 -- | A function call argument.
-data Arg = ExpArg Exp
-         | MemArg VName
-         deriving (Show)
+data Arg
+  = ExpArg Exp
+  | MemArg VName
+  deriving (Show)
 
 -- | Phantom type for a count of elements.
 data Elements
@@ -241,18 +257,24 @@ index arr i t s vol = LeafExp (Index arr i t s vol) t
 
 instance Pretty op => Pretty (Functions op) where
   ppr (Functions funs) = stack $ intersperse mempty $ map ppFun funs
-    where ppFun (name, fun) =
-            text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
+    where
+      ppFun (name, fun) =
+        text "Function " <> ppr name <> colon </> indent 2 (ppr fun)
 
 instance Pretty op => Pretty (FunctionT op) where
   ppr (Function _ outs ins body results args) =
-    text "Inputs:" </> block ins </>
-    text "Outputs:" </> block outs </>
-    text "Arguments:" </> block args </>
-    text "Result:" </> block results </>
-    text "Body:" </> indent 2 (ppr body)
-    where block :: Pretty a => [a] -> Doc
-          block = indent 2 . stack . map ppr
+    text "Inputs:" </> block ins
+      </> text "Outputs:"
+      </> block outs
+      </> text "Arguments:"
+      </> block args
+      </> text "Result:"
+      </> block results
+      </> text "Body:"
+      </> indent 2 (ppr body)
+    where
+      block :: Pretty a => [a] -> Doc
+      block = indent 2 . stack . map ppr
 
 instance Pretty Param where
   ppr (ScalarParam name ptype) = ppr ptype <+> ppr name
@@ -261,20 +283,23 @@ instance Pretty Param where
 instance Pretty ValueDesc where
   ppr (ScalarValue t ept name) =
     ppr t <+> ppr name <> ept'
-    where ept' = case ept of TypeUnsigned -> text " (unsigned)"
-                             TypeDirect   -> mempty
+    where
+      ept' = case ept of
+        TypeUnsigned -> text " (unsigned)"
+        TypeDirect -> mempty
   ppr (ArrayValue mem space et ept shape) =
     foldr f (ppr et) shape <+> text "at" <+> ppr mem <> ppr space <+> ept'
-    where f e s = brackets $ s <> comma <> ppr e
-          ept' = case ept of TypeUnsigned -> text " (unsigned)"
-                             TypeDirect   -> mempty
-
+    where
+      f e s = brackets $ s <> comma <> ppr e
+      ept' = case ept of
+        TypeUnsigned -> text " (unsigned)"
+        TypeDirect -> mempty
 
 instance Pretty ExternalValue where
   ppr (TransparentValue v) = ppr v
   ppr (OpaqueValue desc vs) =
-    text "opaque" <+> text desc <+>
-    nestedBlock "{" "}" (stack $ map ppr vs)
+    text "opaque" <+> text desc
+      <+> nestedBlock "{" "}" (stack $ map ppr vs)
 
 instance Pretty ArrayContents where
   ppr (ArrayValues vs) = braces (commasep $ map ppr vs)
@@ -282,34 +307,40 @@ instance Pretty ArrayContents where
 
 instance Pretty op => Pretty (Code op) where
   ppr (Op op) = ppr op
-  ppr Skip   = text "skip"
+  ppr Skip = text "skip"
   ppr (c1 :>>: c2) = ppr c1 </> ppr c2
   ppr (For i it limit body) =
-    text "for" <+> ppr i <> text ":" <> ppr it <+> langle <+> ppr limit <+> text "{" </>
-    indent 2 (ppr body) </>
-    text "}"
+    text "for" <+> ppr i <> text ":" <> ppr it <+> langle <+> ppr limit <+> text "{"
+      </> indent 2 (ppr body)
+      </> text "}"
   ppr (While cond body) =
-    text "while" <+> ppr cond <+> text "{" </>
-    indent 2 (ppr body) </>
-    text "}"
+    text "while" <+> ppr cond <+> text "{"
+      </> indent 2 (ppr body)
+      </> text "}"
   ppr (DeclareMem name space) =
     text "var" <+> ppr name <> text ": mem" <> ppr space
   ppr (DeclareScalar name vol t) =
     text "var" <+> ppr name <> text ":" <+> vol' <> ppr t
-    where vol' = case vol of Volatile -> text "volatile "
-                             Nonvolatile -> mempty
+    where
+      vol' = case vol of
+        Volatile -> text "volatile "
+        Nonvolatile -> mempty
   ppr (DeclareArray name space t vs) =
-    text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t <+>
-    equals <+> ppr vs
+    text "array" <+> ppr name <> text "@" <> ppr space <+> text ":" <+> ppr t
+      <+> equals
+      <+> ppr vs
   ppr (Allocate name e space) =
     ppr name <+> text "<-" <+> text "malloc" <> parens (ppr e) <> ppr space
   ppr (Free name space) =
     text "free" <> parens (ppr name) <> ppr space
   ppr (Write name i bt space vol val) =
-    ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i) <+>
-    text "<-" <+> ppr val
-    where vol' = case vol of Volatile -> text "volatile "
-                             Nonvolatile -> mempty
+    ppr name <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr i)
+      <+> text "<-"
+      <+> ppr val
+    where
+      vol' = case vol of
+        Volatile -> text "volatile "
+        Nonvolatile -> mempty
   ppr (SetScalar name val) =
     ppr name <+> text "<-" <+> ppr val
   ppr (SetMem dest from space) =
@@ -317,21 +348,24 @@ instance Pretty op => Pretty (Code op) where
   ppr (Assert e msg _) =
     text "assert" <> parens (commasep [ppr msg, ppr e])
   ppr (Copy dest destoffset destspace src srcoffset srcspace size) =
-    text "memcpy" <>
-    parens (ppMemLoc dest destoffset <> ppr destspace <> comma </>
-            ppMemLoc src srcoffset <> ppr srcspace <> comma </>
-            ppr size)
-    where ppMemLoc base offset =
-            ppr base <+> text "+" <+> ppr offset
+    text "memcpy"
+      <> parens
+        ( ppMemLoc dest destoffset <> ppr destspace <> comma
+            </> ppMemLoc src srcoffset <> ppr srcspace <> comma
+            </> ppr size
+        )
+    where
+      ppMemLoc base offset =
+        ppr base <+> text "+" <+> ppr offset
   ppr (If cond tbranch fbranch) =
-    text "if" <+> ppr cond <+> text "then {" </>
-    indent 2 (ppr tbranch) </>
-    text "} else {" </>
-    indent 2 (ppr fbranch) </>
-    text "}"
+    text "if" <+> ppr cond <+> text "then {"
+      </> indent 2 (ppr tbranch)
+      </> text "} else {"
+      </> indent 2 (ppr fbranch)
+      </> text "}"
   ppr (Call dests fname args) =
-    commasep (map ppr dests) <+> text "<-" <+>
-    ppr fname <> parens (commasep $ map ppr args)
+    commasep (map ppr dests) <+> text "<-"
+      <+> ppr fname <> parens (commasep $ map ppr args)
   ppr (Comment s code) =
     text "--" <+> text s </> ppr code
   ppr (DebugPrint desc (Just e)) =
@@ -348,9 +382,10 @@ instance Pretty ExpLeaf where
     ppr v
   ppr (Index v is bt space vol) =
     ppr v <> langle <> vol' <> ppr bt <> ppr space <> rangle <> brackets (ppr is)
-    where vol' = case vol of Volatile -> text "volatile "
-                             Nonvolatile -> mempty
-
+    where
+      vol' = case vol of
+        Volatile -> text "volatile "
+        Nonvolatile -> mempty
   ppr (SizeOf t) =
     text "sizeof" <> parens (ppr t)
 
@@ -363,7 +398,8 @@ instance Foldable Functions where
 instance Traversable Functions where
   traverse f (Functions funs) =
     Functions <$> traverse f' funs
-    where f' (name, fun) = (name,) <$> traverse f fun
+    where
+      f' (name, fun) = (name,) <$> traverse f fun
 
 instance Functor FunctionT where
   fmap = fmapDefault
@@ -443,9 +479,9 @@ instance FreeIn a => FreeIn (Code a) where
     freeIn' cond <> freeIn' body
   freeIn' (DeclareMem _ space) =
     freeIn' space
-  freeIn' DeclareScalar{} =
+  freeIn' DeclareScalar {} =
     mempty
-  freeIn' DeclareArray{} =
+  freeIn' DeclareArray {} =
     mempty
   freeIn' (Allocate name size space) =
     freeIn' name <> freeIn' size <> freeIn' space

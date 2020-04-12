@@ -1,36 +1,42 @@
 module Futhark.CodeGen.Backends.SequentialCSharp
-     ( compileProg
-     ) where
+  ( compileProg,
+  )
+where
 
 import Control.Monad
-import Futhark.Representation.ExplicitMemory
-import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
-import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import qualified Futhark.CodeGen.Backends.GenericCSharp as CS
 import Futhark.CodeGen.Backends.GenericCSharp.AST ()
+import qualified Futhark.CodeGen.ImpCode.Sequential as Imp
+import qualified Futhark.CodeGen.ImpGen.Sequential as ImpGen
 import Futhark.MonadFreshNames
+import Futhark.Representation.ExplicitMemory
 
-compileProg :: MonadFreshNames m =>
-               Maybe String -> Prog ExplicitMemory -> m String
+compileProg ::
+  MonadFreshNames m =>
+  Maybe String ->
+  Prog ExplicitMemory ->
+  m String
 compileProg module_name =
-  ImpGen.compileProg >=>
-  CS.compileProg
-  module_name
-  CS.emptyConstructor
-  []
-  []
-  operations
-  ()
-  empty
-  []
-  []
-  []
-  where operations :: CS.Operations Imp.Sequential ()
-        operations = CS.defaultOperations
-                     { CS.opsCompiler = const $ return ()
-                     , CS.opsCopy = copySequentialMemory
-                     }
-        empty = return ()
+  ImpGen.compileProg
+    >=> CS.compileProg
+      module_name
+      CS.emptyConstructor
+      []
+      []
+      operations
+      ()
+      empty
+      []
+      []
+      []
+  where
+    operations :: CS.Operations Imp.Sequential ()
+    operations =
+      CS.defaultOperations
+        { CS.opsCompiler = const $ return (),
+          CS.opsCopy = copySequentialMemory
+        }
+    empty = return ()
 
 copySequentialMemory :: CS.Copy Imp.Sequential ()
 copySequentialMemory destmem destidx DefaultSpace srcmem srcidx DefaultSpace nbytes _bt =

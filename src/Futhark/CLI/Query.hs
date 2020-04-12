@@ -1,12 +1,11 @@
 module Futhark.CLI.Query (main) where
 
-import Text.Read (readMaybe)
-
 import Data.Loc
 import Futhark.Compiler
 import Futhark.Util.Options
 import Language.Futhark.Query
 import Language.Futhark.Syntax
+import Text.Read (readMaybe)
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions () [] "program line:col" $ \args () ->

@@ -1,37 +1,36 @@
 {-# LANGUAGE Strict #-}
+
 -- | A usage-table is sort of a bottom-up symbol table, describing how
 -- (and if) a variable is used.
 module Futhark.Analysis.UsageTable
-  ( UsageTable
-  , empty
-  , without
-  , lookup
-  , used
-  , expand
-  , isConsumed
-  , isInResult
-  , isUsedDirectly
-  , usages
-  , usage
-  , consumedUsage
-  , inResultUsage
-  , Usages
+  ( UsageTable,
+    empty,
+    without,
+    lookup,
+    used,
+    expand,
+    isConsumed,
+    isInResult,
+    isUsedDirectly,
+    usages,
+    usage,
+    consumedUsage,
+    inResultUsage,
+    Usages,
   )
-  where
+where
 
 import Control.Arrow (first)
 import Data.Bits
 import qualified Data.Foldable as Foldable
 import Data.List (foldl')
 import qualified Data.Map.Strict as M
-
+import Futhark.Representation.AST
+import Futhark.Transform.Substitute
 import Prelude hiding (lookup)
 
-import Futhark.Transform.Substitute
-import Futhark.Representation.AST
-
 newtype UsageTable = UsageTable (M.Map VName Usages)
-                   deriving (Eq, Show)
+  deriving (Eq, Show)
 
 instance Semigroup UsageTable where
   UsageTable table1 <> UsageTable table2 =
@@ -43,13 +42,13 @@ instance Monoid UsageTable where
 instance Substitute UsageTable where
   substituteNames subst (UsageTable table)
     | not $ M.null $ subst `M.intersection` table =
-      UsageTable $ M.fromList $
-      map (first $ substituteNames subst) $ M.toList table
+      UsageTable $ M.fromList
+        $ map (first $ substituteNames subst)
+        $ M.toList table
     | otherwise = UsageTable table
 
 empty :: UsageTable
 empty = UsageTable M.empty
-
 
 without :: UsageTable -> [VName] -> UsageTable
 without (UsageTable table) = UsageTable . Foldable.foldl (flip M.delete) table
@@ -66,9 +65,12 @@ used = lookupPred $ const True
 -- | Expand the usage table based on aliasing information.
 expand :: (VName -> Names) -> UsageTable -> UsageTable
 expand look (UsageTable m) = UsageTable $ foldl' grow m $ M.toList m
-  where grow m' (k, v) = foldl' (grow'' $ v `withoutU` presentU) m' $
-                         namesToList $ look k
-        grow'' v m'' k = M.insertWith (<>) k v m''
+  where
+    grow m' (k, v) =
+      foldl' (grow'' $ v `withoutU` presentU) m'
+        $ namesToList
+        $ look k
+    grow'' v m'' k = M.insertWith (<>) k v m''
 
 is :: Usages -> VName -> UsageTable -> Bool
 is = lookupPred . matches
@@ -85,7 +87,7 @@ isUsedDirectly :: VName -> UsageTable -> Bool
 isUsedDirectly = is presentU
 
 usages :: Names -> UsageTable
-usages names = UsageTable $ M.fromList [ (name, presentU) | name <- namesToList names ]
+usages names = UsageTable $ M.fromList [(name, presentU) | name <- namesToList names]
 
 usage :: VName -> Usages -> UsageTable
 usage name uses = UsageTable $ M.singleton name uses

@@ -1,87 +1,109 @@
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE TupleSections #-}
+
 module Futhark.CodeGen.Backends.CCUDA
-  ( compileProg
-  , GC.CParts(..)
-  , GC.asLibrary
-  , GC.asExecutable
-  ) where
+  ( compileProg,
+    GC.CParts (..),
+    GC.asLibrary,
+    GC.asExecutable,
+  )
+where
 
 import Control.Monad
 import Data.List (intercalate)
 import Data.Maybe (catMaybes)
-import qualified Language.C.Quote.OpenCL as C
-
-import qualified Futhark.CodeGen.Backends.GenericC as GC
-import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
-import Futhark.Representation.ExplicitMemory hiding (GetSize, CmpSizeLe, GetSizeMax)
-import Futhark.MonadFreshNames
-import Futhark.CodeGen.ImpCode.OpenCL
-import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
 import Futhark.CodeGen.Backends.CCUDA.Boilerplate
+import Futhark.CodeGen.Backends.COpenCL.Boilerplate (commonOptions)
+import qualified Futhark.CodeGen.Backends.GenericC as GC
 import Futhark.CodeGen.Backends.GenericC.Options
+import Futhark.CodeGen.ImpCode.OpenCL
+import qualified Futhark.CodeGen.ImpGen.CUDA as ImpGen
+import Futhark.MonadFreshNames
+import Futhark.Representation.ExplicitMemory hiding (CmpSizeLe, GetSize, GetSizeMax)
+import qualified Language.C.Quote.OpenCL as C
 
 compileProg :: MonadFreshNames m => Prog ExplicitMemory -> m GC.CParts
 compileProg prog = do
   (Program cuda_code cuda_prelude kernel_names _ sizes failures prog') <-
     ImpGen.compileProg prog
-  let extra = generateBoilerplate cuda_code cuda_prelude
-              kernel_names sizes failures
-  GC.compileProg operations extra cuda_includes
-    [Space "device", DefaultSpace] cliOptions prog'
+  let extra =
+        generateBoilerplate
+          cuda_code
+          cuda_prelude
+          kernel_names
+          sizes
+          failures
+  GC.compileProg
+    operations
+    extra
+    cuda_includes
+    [Space "device", DefaultSpace]
+    cliOptions
+    prog'
   where
     operations :: GC.Operations OpenCL ()
-    operations = GC.defaultOperations
-                 { GC.opsWriteScalar = writeCUDAScalar
-                 , GC.opsReadScalar  = readCUDAScalar
-                 , GC.opsAllocate    = allocateCUDABuffer
-                 , GC.opsDeallocate  = deallocateCUDABuffer
-                 , GC.opsCopy        = copyCUDAMemory
-                 , GC.opsStaticArray = staticCUDAArray
-                 , GC.opsMemoryType  = cudaMemoryType
-                 , GC.opsCompiler    = callKernel
-                 , GC.opsFatMemory   = True
-                 }
-    cuda_includes = unlines [ "#include <cuda.h>"
-                            , "#include <nvrtc.h>"
-                            ]
+    operations =
+      GC.defaultOperations
+        { GC.opsWriteScalar = writeCUDAScalar,
+          GC.opsReadScalar = readCUDAScalar,
+          GC.opsAllocate = allocateCUDABuffer,
+          GC.opsDeallocate = deallocateCUDABuffer,
+          GC.opsCopy = copyCUDAMemory,
+          GC.opsStaticArray = staticCUDAArray,
+          GC.opsMemoryType = cudaMemoryType,
+          GC.opsCompiler = callKernel,
+          GC.opsFatMemory = True
+        }
+    cuda_includes =
+      unlines
+        [ "#include <cuda.h>",
+          "#include <nvrtc.h>"
+        ]
 
 cliOptions :: [Option]
 cliOptions =
-  commonOptions ++
-  [ Option { optionLongName = "dump-cuda"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
+  commonOptions
+    ++ [ Option
+           { optionLongName = "dump-cuda",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction =
+               [C.cstm|{futhark_context_config_dump_program_to(cfg, optarg);
                                      entry_point = NULL;}|]
-           }
-  , Option { optionLongName = "load-cuda"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
-           }
-  , Option { optionLongName = "dump-ptx"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
+           },
+         Option
+           { optionLongName = "load-cuda",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction = [C.cstm|futhark_context_config_load_program_from(cfg, optarg);|]
+           },
+         Option
+           { optionLongName = "dump-ptx",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction =
+               [C.cstm|{futhark_context_config_dump_ptx_to(cfg, optarg);
                                      entry_point = NULL;}|]
+           },
+         Option
+           { optionLongName = "load-ptx",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "FILE",
+             optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
+           },
+         Option
+           { optionLongName = "nvrtc-option",
+             optionShortName = Nothing,
+             optionArgument = RequiredArgument "OPT",
+             optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
            }
-  , Option { optionLongName = "load-ptx"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "FILE"
-           , optionAction = [C.cstm|futhark_context_config_load_ptx_from(cfg, optarg);|]
-           }
-  , Option { optionLongName = "nvrtc-option"
-           , optionShortName = Nothing
-           , optionArgument = RequiredArgument "OPT"
-           , optionAction = [C.cstm|futhark_context_config_add_nvrtc_option(cfg, optarg);|]
-           }
-  ]
+       ]
 
 writeCUDAScalar :: GC.WriteScalar OpenCL ()
 writeCUDAScalar mem idx t "device" _ val = do
   val' <- newVName "write_tmp"
-  GC.stm [C.cstm|{$ty:t $id:val' = $exp:val;
+  GC.stm
+    [C.cstm|{$ty:t $id:val' = $exp:val;
                   CUDA_SUCCEED(
                     cuMemcpyHtoD($exp:mem + $exp:idx * sizeof($ty:t),
                                  &$id:val',
@@ -94,7 +116,8 @@ readCUDAScalar :: GC.ReadScalar OpenCL ()
 readCUDAScalar mem idx t "device" _ = do
   val <- newVName "read_res"
   GC.decl [C.cdecl|$ty:t $id:val;|]
-  GC.stm [C.cstm|CUDA_SUCCEED(
+  GC.stm
+    [C.cstm|CUDA_SUCCEED(
                    cuMemcpyDtoH(&$id:val,
                                 $exp:mem + $exp:idx * sizeof($ty:t),
                                 sizeof($ty:t)));
@@ -119,17 +142,22 @@ deallocateCUDABuffer _ _ space =
 copyCUDAMemory :: GC.Copy OpenCL ()
 copyCUDAMemory dstmem dstidx dstSpace srcmem srcidx srcSpace nbytes = do
   fn <- memcpyFun dstSpace srcSpace
-  GC.stm [C.cstm|CUDA_SUCCEED(
+  GC.stm
+    [C.cstm|CUDA_SUCCEED(
                   $id:fn($exp:dstmem + $exp:dstidx,
                          $exp:srcmem + $exp:srcidx,
                          $exp:nbytes));
                 |]
   where
-    memcpyFun DefaultSpace (Space "device")     = return "cuMemcpyDtoH"
-    memcpyFun (Space "device") DefaultSpace     = return "cuMemcpyHtoD"
+    memcpyFun DefaultSpace (Space "device") = return "cuMemcpyDtoH"
+    memcpyFun (Space "device") DefaultSpace = return "cuMemcpyHtoD"
     memcpyFun (Space "device") (Space "device") = return "cuMemcpy"
-    memcpyFun _ _ = error $ "Cannot copy to '" ++ show dstSpace
-                           ++ "' from '" ++ show srcSpace ++ "'."
+    memcpyFun _ _ =
+      error $
+        "Cannot copy to '" ++ show dstSpace
+          ++ "' from '"
+          ++ show srcSpace
+          ++ "'."
 
 staticCUDAArray :: GC.StaticArray OpenCL ()
 staticCUDAArray name "device" t vs = do
@@ -146,7 +174,8 @@ staticCUDAArray name "device" t vs = do
   -- Fake a memory block.
   GC.contextField (pretty name) [C.cty|struct memblock_device|] Nothing
   -- During startup, copy the data to where we need it.
-  GC.atInit [C.cstm|{
+  GC.atInit
+    [C.cstm|{
     ctx->$id:name.references = NULL;
     ctx->$id:name.size = 0;
     CUDA_SUCCEED(cuMemAlloc(&ctx->$id:name.mem,
@@ -158,8 +187,9 @@ staticCUDAArray name "device" t vs = do
   }|]
   GC.item [C.citem|struct memblock_device $id:name = ctx->$id:name;|]
 staticCUDAArray _ space _ _ =
-  error $ "CUDA backend cannot create static array in '" ++ space
-          ++ "' memory space"
+  error $
+    "CUDA backend cannot create static array in '" ++ space
+      ++ "' memory space"
 
 cudaMemoryType :: GC.MemoryType OpenCL ()
 cudaMemoryType "device" = return [C.cty|typename CUdeviceptr|]
@@ -174,7 +204,7 @@ callKernel (CmpSizeLe v key x) = do
   GC.stm [C.cstm|$id:v = ctx->sizes.$id:key <= $exp:x';|]
 callKernel (GetSizeMax v size_class) =
   let field = "max_" ++ cudaSizeClass size_class
-  in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
+   in GC.stm [C.cstm|$id:v = ctx->cuda.$id:field;|]
   where
     cudaSizeClass (SizeThreshold _) = "threshold"
     cudaSizeClass SizeGroup = "block_size"
@@ -191,24 +221,35 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
       shared_offsets_sc = mkOffsets shared_sizes
       shared_args = zip shared_offsets shared_offsets_sc
       shared_tot = last shared_offsets_sc
-  mapM_ (\(arg,offset) ->
-           GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
-        ) shared_args
-
+  mapM_
+    ( \(arg, offset) ->
+        GC.decl [C.cdecl|unsigned int $id:arg = $exp:offset;|]
+    )
+    shared_args
   (grid_x, grid_y, grid_z) <- mkDims <$> mapM GC.compileExp num_blocks
   (block_x, block_y, block_z) <- mkDims <$> mapM GC.compileExp block_size
   let perm_args
-        | length num_blocks == 3 = [ [C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|] ]
+        | length num_blocks == 3 = [[C.cinit|&perm[0]|], [C.cinit|&perm[1]|], [C.cinit|&perm[2]|]]
         | otherwise = []
-      failure_args = take (numFailureParams safety)
-                     [[C.cinit|&ctx->global_failure|],
-                      [C.cinit|&ctx->failure_is_an_option|],
-                      [C.cinit|&ctx->global_failure_args|]]
-      args'' = perm_args ++ failure_args ++ [ [C.cinit|&$id:a|] | a <- args' ]
-      sizes_nonzero = expsNotZero [grid_x, grid_y, grid_z,
-                      block_x, block_y, block_z]
-
-  GC.stm [C.cstm|
+      failure_args =
+        take
+          (numFailureParams safety)
+          [ [C.cinit|&ctx->global_failure|],
+            [C.cinit|&ctx->failure_is_an_option|],
+            [C.cinit|&ctx->global_failure_args|]
+          ]
+      args'' = perm_args ++ failure_args ++ [[C.cinit|&$id:a|] | a <- args']
+      sizes_nonzero =
+        expsNotZero
+          [ grid_x,
+            grid_y,
+            grid_z,
+            block_x,
+            block_y,
+            block_z
+          ]
+  GC.stm
+    [C.cstm|
     if ($exp:sizes_nonzero) {
       int perm[3] = { 0, 1, 2 };
 
@@ -250,15 +291,13 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
                 $string:name, $id:time_end - $id:time_start);
       }
     }|]
-
   when (safety >= SafetyFull) $
     GC.stm [C.cstm|ctx->failure_is_an_option = 1;|]
-
   where
-    mkDims [] = ([C.cexp|0|] , [C.cexp|0|], [C.cexp|0|])
+    mkDims [] = ([C.cexp|0|], [C.cexp|0|], [C.cexp|0|])
     mkDims [x] = (x, [C.cexp|1|], [C.cexp|1|])
-    mkDims [x,y] = (x, y, [C.cexp|1|])
-    mkDims (x:y:z:_) = (x, y, z)
+    mkDims [x, y] = (x, y, [C.cexp|1|])
+    mkDims (x : y : z : _) = (x, y, z)
     addExp x y = [C.cexp|$exp:x + $exp:y|]
     alignExp e = [C.cexp|$exp:e + ((8 - ($exp:e % 8)) % 8)|]
     mkOffsets = scanl (\a b -> a `addExp` alignExp b) [C.cexp|0|]
@@ -278,7 +317,6 @@ callKernel (LaunchKernel safety name args num_blocks block_size) = do
       offset <- newVName "shared_offset"
       GC.decl [C.cdecl|unsigned int $id:size = $exp:num_bytes;|]
       return (offset, Just (size, offset))
-
     printSizes =
       intercalate [[C.cstm|fprintf(stderr, ", ");|]] . map printSize
     printSize e =

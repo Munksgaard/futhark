@@ -1,24 +1,25 @@
 {-# LANGUAGE FlexibleContexts #-}
-module Futhark.Pass.Simplify
-  ( simplify
-  , simplifySOACS
-  , simplifyKernels
-  , simplifyExplicitMemory
-  )
-  where
 
-import qualified Futhark.Representation.SOACS as R
-import qualified Futhark.Representation.SOACS.Simplify as R
-import qualified Futhark.Representation.Kernels as R
-import qualified Futhark.Representation.Kernels.Simplify as R
-import qualified Futhark.Representation.ExplicitMemory as R
-import qualified Futhark.Representation.ExplicitMemory.Simplify as R
+module Futhark.Pass.Simplify
+  ( simplify,
+    simplifySOACS,
+    simplifyKernels,
+    simplifyExplicitMemory,
+  )
+where
 
 import Futhark.Pass
 import Futhark.Representation.AST.Syntax
+import qualified Futhark.Representation.ExplicitMemory as R
+import qualified Futhark.Representation.ExplicitMemory.Simplify as R
+import qualified Futhark.Representation.Kernels as R
+import qualified Futhark.Representation.Kernels.Simplify as R
+import qualified Futhark.Representation.SOACS as R
+import qualified Futhark.Representation.SOACS.Simplify as R
 
-simplify :: (Prog lore -> PassM (Prog lore))
-         -> Pass lore lore
+simplify ::
+  (Prog lore -> PassM (Prog lore)) ->
+  Pass lore lore
 simplify = Pass "simplify" "Perform simple enabling optimisations."
 
 simplifySOACS :: Pass R.SOACS R.SOACS

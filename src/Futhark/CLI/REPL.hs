@@ -1,57 +1,61 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-module Futhark.CLI.REPL (main) where
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
-import Control.Monad.Free.Church
+module Futhark.CLI.REPL
+  ( main,
+  )
+where
+
 import Control.Exception
-import Data.Char
-import Data.List (intercalate, intersperse)
-import Data.Loc
-import Data.Maybe
-import Data.Version
 import Control.Monad
+import Control.Monad.Except
+import Control.Monad.Free.Church
 import Control.Monad.IO.Class
 import Control.Monad.State
-import Control.Monad.Except
+import Data.Char
+import Data.List (intercalate, intersperse)
 import qualified Data.List.NonEmpty as NE
+import Data.Loc
+import Data.Maybe
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
+import Data.Version
+import Futhark.Compiler
+import Futhark.MonadFreshNames
+import Futhark.Pipeline
+import Futhark.Util (toPOSIX)
+import Futhark.Util.Options
+import Futhark.Version
+import Language.Futhark
+import qualified Language.Futhark.Interpreter as I
+import Language.Futhark.Parser hiding (EOF)
+import qualified Language.Futhark.Semantic as T
+import qualified Language.Futhark.TypeChecker as T
 import NeatInterpolation (text)
+import System.Console.GetOpt
+import qualified System.Console.Haskeline as Haskeline
 import System.Directory
 import System.FilePath
-import System.Console.GetOpt
 import System.IO
 import Text.Read (readMaybe)
-import qualified System.Console.Haskeline as Haskeline
-
-import Language.Futhark
-import Language.Futhark.Parser hiding (EOF)
-import qualified Language.Futhark.TypeChecker as T
-import qualified Language.Futhark.Semantic as T
-import Futhark.MonadFreshNames
-import Futhark.Version
-import Futhark.Compiler
-import Futhark.Pipeline
-import Futhark.Util.Options
-import Futhark.Util (toPOSIX)
-
-import qualified Language.Futhark.Interpreter as I
 
 banner :: String
-banner = unlines [
-  "|// |\\    |   |\\  |\\   /",
-  "|/  | \\   |\\  |\\  |/  /",
-  "|   |  \\  |/  |   |\\  \\",
-  "|   |   \\ |   |   | \\  \\"
-  ]
+banner =
+  unlines
+    [ "|// |\\    |   |\\  |\\   /",
+      "|/  | \\   |\\  |\\  |/  /",
+      "|   |  \\  |/  |   |\\  \\",
+      "|   |   \\ |   |   | \\  \\"
+    ]
 
 main :: String -> [String] -> IO ()
 main = mainWithOptions interpreterConfig options "options..." run
-  where run []     _      = Just repl
-        run _      _      = Nothing
+  where
+    run [] _ = Just repl
+    run _ _ = Nothing
 
 data StopReason = EOF | Stop | Exit | Load FilePath
 
@@ -63,7 +67,6 @@ repl = do
   putStrLn ""
   putStrLn "Run :help for a list of commands."
   putStrLn ""
-
   let toploop s = do
         (stop, s') <- runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint) s
         case stop of
@@ -76,19 +79,17 @@ repl = do
               liftIO $ newFutharkiState (futharkiCount s) $ Just file
             case maybe_new_state of
               Right new_state -> toploop new_state
-              Left err -> do liftIO $ putStrLn err
-                             toploop s'
+              Left err -> do
+                liftIO $ putStrLn err
+                toploop s'
           Right _ -> return ()
-
       finish s = do
         quit <- confirmQuit
         if quit then return () else toploop s
-
   maybe_init_state <- liftIO $ newFutharkiState 0 Nothing
   case maybe_init_state of
     Left err -> error $ "Failed to initialise interpreter state: " ++ err
     Right init_state -> Haskeline.runInputT Haskeline.defaultSettings $ toploop init_state
-
   putStrLn "Leaving 'futhark repl'."
 
 confirmQuit :: Haskeline.InputT IO Bool
@@ -98,90 +99,113 @@ confirmQuit = do
     Nothing -> return True -- EOF
     Just 'y' -> return True
     Just 'n' -> return False
-    _        -> confirmQuit
+    _ -> confirmQuit
 
-newtype InterpreterConfig = InterpreterConfig { interpreterEntryPoint :: Name }
+newtype InterpreterConfig = InterpreterConfig {interpreterEntryPoint :: Name}
 
 interpreterConfig :: InterpreterConfig
 interpreterConfig = InterpreterConfig defaultEntryPoint
 
 options :: [FunOptDescr InterpreterConfig]
-options = [ Option "e" ["entry-point"]
-          (ReqArg (\entry -> Right $ \config ->
-                      config { interpreterEntryPoint = nameFromString entry })
-           "NAME")
-            "The entry point to execute."
-          ]
+options =
+  [ Option
+      "e"
+      ["entry-point"]
+      ( ReqArg
+          ( \entry -> Right $ \config ->
+              config {interpreterEntryPoint = nameFromString entry}
+          )
+          "NAME"
+      )
+      "The entry point to execute."
+  ]
 
 -- | Representation of breaking at a breakpoint, to allow for
 -- navigating through the stack frames and such.
-data Breaking = Breaking { breakingStack :: NE.NonEmpty I.StackFrame
-                         , breakingAt :: Int
-                           -- ^ Index of the current breakpoint (with
-                           -- 0 being the outermost).
-                         }
+data Breaking
+  = Breaking
+      { breakingStack :: NE.NonEmpty I.StackFrame,
+        -- | Index of the current breakpoint (with
+        -- 0 being the outermost).
+        breakingAt :: Int
+      }
 
-data FutharkiState =
-  FutharkiState { futharkiImports :: Imports
-                , futharkiNameSource :: VNameSource
-                , futharkiCount :: Int
-                , futharkiEnv :: (T.Env, I.Ctx)
-                , futharkiBreaking :: Maybe Breaking
-                  -- ^ Are we currently stopped at a breakpoint?
-                , futharkiSkipBreaks :: [Loc]
-                -- ^ Skip breakpoints at these locations.
-                , futharkiLoaded :: Maybe FilePath
-                -- ^ The currently loaded file.
-                }
+data FutharkiState
+  = FutharkiState
+      { futharkiImports :: Imports,
+        futharkiNameSource :: VNameSource,
+        futharkiCount :: Int,
+        futharkiEnv :: (T.Env, I.Ctx),
+        -- | Are we currently stopped at a breakpoint?
+        futharkiBreaking :: Maybe Breaking,
+        -- | Skip breakpoints at these locations.
+        futharkiSkipBreaks :: [Loc],
+        -- | The currently loaded file.
+        futharkiLoaded :: Maybe FilePath
+      }
 
 newFutharkiState :: Int -> Maybe FilePath -> IO (Either String FutharkiState)
 newFutharkiState count maybe_file = runExceptT $ do
   (imports, src, tenv, ienv) <- case maybe_file of
-
     Nothing -> do
       -- Load the builtins through the type checker.
       (_, imports, src) <- badOnLeft show =<< runExceptT (readLibrary [])
       -- Then into the interpreter.
-      ienv <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
-              I.initialCtx $ map (fmap fileProg) imports
-
+      ienv <-
+        foldM
+          (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx)
+          I.initialCtx
+          $ map (fmap fileProg) imports
       -- Then make the prelude available in the type checker.
-      (tenv, d, src') <- badOnLeft pretty $ T.checkDec imports src T.initialEnv
-                         (T.mkInitialImport ".") $ mkOpen "/prelude/prelude"
+      (tenv, d, src') <-
+        badOnLeft pretty
+          $ T.checkDec
+            imports
+            src
+            T.initialEnv
+            (T.mkInitialImport ".")
+          $ mkOpen "/prelude/prelude"
       -- Then in the interpreter.
       ienv' <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv d)
       return (imports, src', tenv, ienv')
-
     Just file -> do
       (ws, imports, src) <-
-        badOnLeft show =<<
-        liftIO (runExceptT (readProgram file)
-                 `catch` \(err::IOException) ->
-                   return (externalErrorS (show err)))
+        badOnLeft show
+          =<< liftIO
+            ( runExceptT (readProgram file)
+                `catch` \(err :: IOException) ->
+                  return (externalErrorS (show err))
+            )
       liftIO $ hPrint stderr ws
-
       let imp = T.mkInitialImport "."
-      ienv1 <- foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
-               map (fmap fileProg) imports
-      (tenv1, d1, src') <- badOnLeft pretty $ T.checkDec imports src T.initialEnv imp $
-                           mkOpen "/prelude/prelude"
-      (tenv2, d2, src'') <- badOnLeft pretty $ T.checkDec imports src' tenv1 imp $
-                            mkOpen $ toPOSIX $ dropExtension file
+      ienv1 <-
+        foldM (\ctx -> badOnLeft show <=< runInterpreter' . I.interpretImport ctx) I.initialCtx $
+          map (fmap fileProg) imports
+      (tenv1, d1, src') <-
+        badOnLeft pretty $ T.checkDec imports src T.initialEnv imp $
+          mkOpen "/prelude/prelude"
+      (tenv2, d2, src'') <-
+        badOnLeft pretty $ T.checkDec imports src' tenv1 imp
+          $ mkOpen
+          $ toPOSIX
+          $ dropExtension file
       ienv2 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv1 d1)
       ienv3 <- badOnLeft show =<< runInterpreter' (I.interpretDec ienv2 d2)
       return (imports, src'', tenv2, ienv3)
-
-  return FutharkiState { futharkiImports = imports
-                       , futharkiNameSource = src
-                       , futharkiCount = count
-                       , futharkiEnv = (tenv, ienv)
-                       , futharkiBreaking = Nothing
-                       , futharkiSkipBreaks = mempty
-                       , futharkiLoaded = maybe_file
-                       }
-  where badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
-        badOnLeft _ (Right x) = return x
-        badOnLeft p (Left err) = throwError $ p err
+  return
+    FutharkiState
+      { futharkiImports = imports,
+        futharkiNameSource = src,
+        futharkiCount = count,
+        futharkiEnv = (tenv, ienv),
+        futharkiBreaking = Nothing,
+        futharkiSkipBreaks = mempty,
+        futharkiLoaded = maybe_file
+      }
+  where
+    badOnLeft :: (err -> String) -> Either err a -> ExceptT String IO a
+    badOnLeft _ (Right x) = return x
+    badOnLeft p (Left err) = throwError $ p err
 
 getPrompt :: FutharkiM String
 getPrompt = do
@@ -192,10 +216,16 @@ mkOpen :: FilePath -> UncheckedDec
 mkOpen f = OpenDec (ModImport f NoInfo noLoc) noLoc
 
 -- The ExceptT part is more of a continuation, really.
-newtype FutharkiM a =
-  FutharkiM { runFutharkiM :: ExceptT StopReason (StateT FutharkiState (Haskeline.InputT IO)) a }
-  deriving (Functor, Applicative, Monad,
-            MonadState FutharkiState, MonadIO, MonadError StopReason)
+newtype FutharkiM a
+  = FutharkiM {runFutharkiM :: ExceptT StopReason (StateT FutharkiState (Haskeline.InputT IO)) a}
+  deriving
+    ( Functor,
+      Applicative,
+      Monad,
+      MonadState FutharkiState,
+      MonadIO,
+      MonadError StopReason
+    )
 
 readEvalPrint :: FutharkiM ()
 readEvalPrint = do
@@ -206,30 +236,30 @@ readEvalPrint = do
     Nothing
       | isJust breaking -> throwError Stop
       | otherwise -> return ()
-
     Just (':', command) -> do
       let (cmdname, rest) = T.break isSpace command
           arg = T.dropWhileEnd isSpace $ T.dropWhile isSpace rest
       case filter ((cmdname `T.isPrefixOf`) . fst) commands of
         [] -> liftIO $ T.putStrLn $ "Unknown command '" <> cmdname <> "'"
         [(_, (cmdf, _))] -> cmdf arg
-        matches -> liftIO $ T.putStrLn $ "Ambiguous command; could be one of " <>
-                   mconcat (intersperse ", " (map fst matches))
-
+        matches ->
+          liftIO $ T.putStrLn $
+            "Ambiguous command; could be one of "
+              <> mconcat (intersperse ", " (map fst matches))
     _ -> do
       -- Read a declaration or expression.
       maybe_dec_or_e <- parseDecOrExpIncrM (inputLine "  ") prompt line
-
       case maybe_dec_or_e of
         Left err -> liftIO $ print err
         Right (Left d) -> onDec d
         Right (Right e) -> onExp e
-  modify $ \s -> s { futharkiCount = futharkiCount s + 1 }
-  where inputLine prompt = do
-          inp <- FutharkiM $ lift $ lift $ Haskeline.getInputLine prompt
-          case inp of
-            Just s -> return $ T.pack s
-            Nothing -> throwError EOF
+  modify $ \s -> s {futharkiCount = futharkiCount s + 1}
+  where
+    inputLine prompt = do
+      inp <- FutharkiM $ lift $ lift $ Haskeline.getInputLine prompt
+      case inp of
+        Just s -> return $ T.pack s
+        Nothing -> throwError EOF
 
 getIt :: FutharkiM (Imports, VNameSource, T.Env, I.Ctx)
 getIt = do
@@ -242,7 +272,6 @@ onDec :: UncheckedDec -> FutharkiM ()
 onDec d = do
   (imports, src, tenv, ienv) <- getIt
   cur_import <- T.mkInitialImport . fromMaybe "." <$> gets futharkiLoaded
-
   -- Most of the complexity here concerns the dealing with the fact
   -- that 'import "foo"' is a declaration.  We have to involve a lot
   -- of machinery to load this external code before executing the
@@ -250,10 +279,9 @@ onDec d = do
   let basis = Basis imports src ["/prelude/prelude"]
       mkImport = uncurry $ T.mkImportFrom cur_import
   imp_r <- runExceptT $ readImports basis (map mkImport $ decImports d)
-
   case imp_r of
     Left e -> liftIO $ print e
-    Right (_, imports',  src') ->
+    Right (_, imports', src') ->
       case T.checkDec imports' src' tenv cur_import d of
         Left e -> liftIO $ putStrLn $ pretty e
         Right (tenv', d', src'') -> do
@@ -265,28 +293,30 @@ onDec d = do
             I.interpretDec ienv' d'
           case int_r of
             Left err -> liftIO $ print err
-            Right ienv' -> modify $ \s -> s { futharkiEnv = (tenv', ienv')
-                                            , futharkiImports = imports'
-                                            , futharkiNameSource = src''
-                                            }
+            Right ienv' -> modify $ \s ->
+              s
+                { futharkiEnv = (tenv', ienv'),
+                  futharkiImports = imports',
+                  futharkiNameSource = src''
+                }
 
 onExp :: UncheckedExp -> FutharkiM ()
 onExp e = do
   (imports, src, tenv, ienv) <- getIt
   case either (Left . pretty) Right $
-       T.checkExp imports src tenv e of
+    T.checkExp imports src tenv e of
     Left err -> liftIO $ putStrLn err
     Right (tparams, e')
       | null tparams -> do
-          r <- runInterpreter $ I.interpretExp ienv e'
-          case r of
-            Left err -> liftIO $ print err
-            Right v -> liftIO $ putStrLn $ pretty v
-
+        r <- runInterpreter $ I.interpretExp ienv e'
+        case r of
+          Left err -> liftIO $ print err
+          Right v -> liftIO $ putStrLn $ pretty v
       | otherwise -> liftIO $ do
-          putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
-          putStrLn $ "The following types are ambiguous: " ++
-            intercalate ", " (map (prettyName . typeParamName) tparams)
+        putStrLn $ "Inferred type of expression: " ++ pretty (typeOf e')
+        putStrLn $
+          "The following types are ambiguous: "
+            ++ intercalate ", " (map (prettyName . typeParamName) tparams)
 
 prettyBreaking :: Breaking -> String
 prettyBreaking b =
@@ -302,12 +332,10 @@ runInterpreter m = runF m (return . Right) intOp
       c
     intOp (I.ExtOpBreak callstack c) = do
       s <- get
-
       let top = NE.head callstack
           ctx = I.stackFrameCtx top
           tenv = I.typeCheckerEnv $ I.ctxEnv ctx
           breaking = Breaking callstack 0
-
       -- Are we supposed to skip this breakpoint?  Also, We do not
       -- want recursive breakpoints.  It could work fine technically,
       -- but is probably too confusing to be useful.
@@ -315,32 +343,36 @@ runInterpreter m = runF m (return . Right) intOp
         liftIO $ putStrLn $ "Breakpoint at " ++ locStr top
         liftIO $ putStrLn $ prettyBreaking breaking
         liftIO $ putStrLn "<Enter> to continue."
-
         -- Note the cleverness to preserve the Haskeline session (for
         -- line history and such).
         (stop, s') <-
           FutharkiM $ lift $ lift $
-          runStateT (runExceptT $ runFutharkiM $ forever readEvalPrint)
-          s { futharkiEnv = (tenv, ctx)
-            , futharkiCount = futharkiCount s + 1
-            , futharkiBreaking = Just breaking
-            }
-
+            runStateT
+              (runExceptT $ runFutharkiM $ forever readEvalPrint)
+              s
+                { futharkiEnv = (tenv, ctx),
+                  futharkiCount = futharkiCount s + 1,
+                  futharkiBreaking = Just breaking
+                }
         case stop of
           Left (Load file) -> throwError $ Load file
-          _ -> do liftIO $ putStrLn "Continuing..."
-                  put s { futharkiCount = futharkiCount s'
-                        , futharkiSkipBreaks = futharkiSkipBreaks s' <> futharkiSkipBreaks s }
-
+          _ -> do
+            liftIO $ putStrLn "Continuing..."
+            put
+              s
+                { futharkiCount = futharkiCount s',
+                  futharkiSkipBreaks = futharkiSkipBreaks s' <> futharkiSkipBreaks s
+                }
       c
 
 runInterpreter' :: MonadIO m => F I.ExtOp a -> m (Either I.InterpreterError a)
 runInterpreter' m = runF m (return . Right) intOp
-  where intOp (I.ExtOpError err) = return $ Left err
-        intOp (I.ExtOpTrace w v c) = do
-          liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
-          c
-        intOp (I.ExtOpBreak _ c) = c
+  where
+    intOp (I.ExtOpError err) = return $ Left err
+    intOp (I.ExtOpTrace w v c) = do
+      liftIO $ putStrLn $ "Trace at " ++ locStr w ++ ": " ++ v
+      c
+    intOp (I.ExtOpBreak _ c) = c
 
 type Command = T.Text -> FutharkiM ()
 
@@ -352,11 +384,12 @@ loadCommand file = do
     (True, Nothing) -> liftIO $ T.putStrLn "No file specified and no file previously loaded."
     (False, _) -> throwError $ Load $ T.unpack file
 
-genTypeCommand :: Show err =>
-                  (String -> T.Text -> Either err a)
-               -> (Imports -> VNameSource -> T.Env -> a -> Either T.TypeError b)
-               -> (b -> String)
-               -> Command
+genTypeCommand ::
+  Show err =>
+  (String -> T.Text -> Either err a) ->
+  (Imports -> VNameSource -> T.Env -> a -> Either T.TypeError b) ->
+  (b -> String) ->
+  Command
 genTypeCommand f g h e = do
   prompt <- getPrompt
   case f prompt e of
@@ -371,8 +404,9 @@ genTypeCommand f g h e = do
 
 typeCommand :: Command
 typeCommand = genTypeCommand parseExp T.checkExp $ \(ps, e) ->
-  pretty e <> concatMap ((" "<>) . pretty) ps <>
-  " : " <> pretty (typeOf e)
+  pretty e <> concatMap ((" " <>) . pretty) ps
+    <> " : "
+    <> pretty (typeOf e)
 
 mtypeCommand :: Command
 mtypeCommand = genTypeCommand parseModExp T.checkModExp $ pretty . fst
@@ -382,22 +416,25 @@ unbreakCommand _ = do
   top <- fmap (NE.head . breakingStack) <$> gets futharkiBreaking
   case top of
     Nothing -> liftIO $ putStrLn "Not currently stopped at a breakpoint."
-    Just top' -> do modify $ \s -> s { futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s }
-                    throwError Stop
+    Just top' -> do
+      modify $ \s -> s {futharkiSkipBreaks = locOf top' : futharkiSkipBreaks s}
+      throwError Stop
 
 frameCommand :: Command
 frameCommand which = do
   maybe_stack <- fmap breakingStack <$> gets futharkiBreaking
   case (maybe_stack, readMaybe $ T.unpack which) of
     (Just stack, Just i)
-      | frame:_ <- NE.drop i stack -> do
-          let breaking = Breaking stack i
-              ctx = I.stackFrameCtx frame
-              tenv = I.typeCheckerEnv $ I.ctxEnv ctx
-          modify $ \s -> s { futharkiEnv = (tenv, ctx)
-                           , futharkiBreaking = Just breaking
-                           }
-          liftIO $ putStrLn $ prettyBreaking breaking
+      | frame : _ <- NE.drop i stack -> do
+        let breaking = Breaking stack i
+            ctx = I.stackFrameCtx frame
+            tenv = I.typeCheckerEnv $ I.ctxEnv ctx
+        modify $ \s ->
+          s
+            { futharkiEnv = (tenv, ctx),
+              futharkiBreaking = Just breaking
+            }
+        liftIO $ putStrLn $ prettyBreaking breaking
     (Just _, _) ->
       liftIO $ putStrLn $ "Invalid stack index: " ++ T.unpack which
     (Nothing, _) ->
@@ -408,24 +445,28 @@ pwdCommand _ = liftIO $ putStrLn =<< getCurrentDirectory
 
 cdCommand :: Command
 cdCommand dir
- | T.null dir = liftIO $ putStrLn "Usage: ':cd <dir>'."
- | otherwise =
-    liftIO $ setCurrentDirectory (T.unpack dir)
-    `catch` \(err::IOException) -> print err
+  | T.null dir = liftIO $ putStrLn "Usage: ':cd <dir>'."
+  | otherwise =
+    liftIO $
+      setCurrentDirectory (T.unpack dir)
+        `catch` \(err :: IOException) -> print err
 
 helpCommand :: Command
 helpCommand _ = liftIO $ forM_ commands $ \(cmd, (_, desc)) -> do
-    T.putStrLn $ ":" <> cmd
-    T.putStrLn $ T.replicate (1+T.length cmd) "-"
-    T.putStr desc
-    T.putStrLn ""
-    T.putStrLn ""
+  T.putStrLn $ ":" <> cmd
+  T.putStrLn $ T.replicate (1 + T.length cmd) "-"
+  T.putStr desc
+  T.putStrLn ""
+  T.putStrLn ""
 
 quitCommand :: Command
 quitCommand _ = throwError Exit
 
 commands :: [(T.Text, (Command, T.Text))]
-commands = [("load", (loadCommand, [text|
+commands =
+  [ ( "load",
+      ( loadCommand,
+        [text|
 Load a Futhark source file.  Usage:
 
   > :load foo.fut
@@ -437,30 +478,65 @@ Only one source file can be loaded at a time.  Using the :load command a
 second time will replace the previously loaded file.  It will also replace
 any declarations entered at the REPL.
 
-|])),
-            ("type", (typeCommand, [text|
+|]
+      )
+    ),
+    ( "type",
+      ( typeCommand,
+        [text|
 Show the type of an expression, which must fit on a single line.
-|])),
-            ("mtype", (mtypeCommand, [text|
+|]
+      )
+    ),
+    ( "mtype",
+      ( mtypeCommand,
+        [text|
 Show the type of a module expression, which must fit on a single line.
-|])),
-            ("unbreak", (unbreakCommand, [text|
+|]
+      )
+    ),
+    ( "unbreak",
+      ( unbreakCommand,
+        [text|
 Skip all future occurences of the current breakpoint.
-|])),
-            ("frame", (frameCommand, [text|
+|]
+      )
+    ),
+    ( "frame",
+      ( frameCommand,
+        [text|
 While at a break point, jump to another stack frame, whose variables can then
 be inspected.  Resuming from the breakpoint will jump back to the innermost
 stack frame.
-|])),
-            ("pwd", (pwdCommand, [text|
+|]
+      )
+    ),
+    ( "pwd",
+      ( pwdCommand,
+        [text|
 Print the current working directory.
-|])),
-            ("cd", (cdCommand, [text|
+|]
+      )
+    ),
+    ( "cd",
+      ( cdCommand,
+        [text|
 Change the current working directory.
-|])),
-            ("help", (helpCommand, [text|
+|]
+      )
+    ),
+    ( "help",
+      ( helpCommand,
+        [text|
 Print a list of commands and a description of their behaviour.
-|])),
-            ("quit", (quitCommand, [text|
+|]
+      )
+    ),
+    ( "quit",
+      ( quitCommand,
+        [text|
 Exit REPL.
-|]))]
+|]
+      )
+    )
+  ]

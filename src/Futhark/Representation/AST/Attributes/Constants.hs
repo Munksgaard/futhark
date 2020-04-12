@@ -1,12 +1,11 @@
 -- | Possibly convenient facilities for constructing constants.
 module Futhark.Representation.AST.Attributes.Constants
-       (
-         IsValue (..)
-       , constant
-       , intConst
-       , floatConst
-       )
-       where
+  ( IsValue (..),
+    constant,
+    intConst,
+    floatConst,
+  )
+where
 
 import Futhark.Representation.AST.Syntax.Core
 

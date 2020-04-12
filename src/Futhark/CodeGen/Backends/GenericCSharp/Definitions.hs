@@ -1,13 +1,15 @@
 {-# LANGUAGE TemplateHaskell #-}
+
 module Futhark.CodeGen.Backends.GenericCSharp.Definitions
-  ( csReader
-  , csMemory
-  , csMemoryOpenCL
-  , csScalar
-  , csPanic
-  , csExceptions
-  , csOpenCL
-  ) where
+  ( csReader,
+    csMemory,
+    csMemoryOpenCL,
+    csScalar,
+    csPanic,
+    csExceptions,
+    csOpenCL,
+  )
+where
 
 import Data.FileEmbed
 

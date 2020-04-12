@@ -1,25 +1,25 @@
 {-# LANGUAGE FlexibleContexts #-}
+
 module Futhark.Analysis.ScalExp
-  ( RelOp0(..)
-  , ScalExp(..)
-  , scalExpType
-  , scalExpSize
-  , subExpToScalExp
-  , toScalExp
-  , expandScalExp
-  , LookupVar
-  , module Futhark.Representation.Primitive
+  ( RelOp0 (..),
+    ScalExp (..),
+    scalExpType,
+    scalExpSize,
+    subExpToScalExp,
+    toScalExp,
+    expandScalExp,
+    LookupVar,
+    module Futhark.Representation.Primitive,
   )
 where
 
 import Data.List (find)
 import Data.Maybe
-
-import Futhark.Representation.Primitive hiding (SQuot, SRem, SDiv, SMod, SSignum)
-import Futhark.Representation.AST hiding (SQuot, SRem, SDiv, SMod, SSignum)
+import Futhark.Representation.AST hiding (SDiv, SMod, SQuot, SRem, SSignum)
 import qualified Futhark.Representation.AST as AST
-import Futhark.Transform.Substitute
+import Futhark.Representation.Primitive hiding (SDiv, SMod, SQuot, SRem, SSignum)
 import Futhark.Transform.Rename
+import Futhark.Transform.Substitute
 import Futhark.Util.Pretty hiding (pretty)
 
 -----------------------------------------------------------------
@@ -30,9 +30,10 @@ import Futhark.Util.Pretty hiding (pretty)
 -----------------------------------------------------------------
 
 -- | Relational operators.
-data RelOp0 = LTH0
-            | LEQ0
-             deriving (Eq, Ord, Enum, Bounded, Show)
+data RelOp0
+  = LTH0
+  | LEQ0
+  deriving (Eq, Ord, Enum, Bounded, Show)
 
 -- | Representation of a scalar expression, which is:
 --
@@ -41,25 +42,26 @@ data RelOp0 = LTH0
 --   (ii) a relational expression: a+b < 5,
 --
 --  (iii) a logical expression: e1 and (not (a+b>5)
-data ScalExp= Val     PrimValue
-            | Id      VName PrimType
-            | SNeg    ScalExp
-            | SNot    ScalExp
-            | SAbs    ScalExp
-            | SSignum ScalExp
-            | SPlus   ScalExp ScalExp
-            | SMinus  ScalExp ScalExp
-            | STimes  ScalExp ScalExp
-            | SPow    ScalExp ScalExp
-            | SDiv ScalExp ScalExp
-            | SMod    ScalExp ScalExp
-            | SQuot   ScalExp ScalExp
-            | SRem    ScalExp ScalExp
-            | MaxMin  Bool   [ScalExp]
-            | RelExp  RelOp0  ScalExp
-            | SLogAnd ScalExp ScalExp
-            | SLogOr  ScalExp ScalExp
-              deriving (Eq, Ord, Show)
+data ScalExp
+  = Val PrimValue
+  | Id VName PrimType
+  | SNeg ScalExp
+  | SNot ScalExp
+  | SAbs ScalExp
+  | SSignum ScalExp
+  | SPlus ScalExp ScalExp
+  | SMinus ScalExp ScalExp
+  | STimes ScalExp ScalExp
+  | SPow ScalExp ScalExp
+  | SDiv ScalExp ScalExp
+  | SMod ScalExp ScalExp
+  | SQuot ScalExp ScalExp
+  | SRem ScalExp ScalExp
+  | MaxMin Bool [ScalExp]
+  | RelExp RelOp0 ScalExp
+  | SLogAnd ScalExp ScalExp
+  | SLogOr ScalExp ScalExp
+  deriving (Eq, Ord, Show)
 
 instance Num ScalExp where
   0 + y = y
@@ -97,38 +99,39 @@ instance Pretty ScalExp where
   pprPrec prec (SRem x y) = ppBinOp prec "%%" 5 10 x y
   pprPrec prec (SLogOr x y) = ppBinOp prec "||" 0 0 x y
   pprPrec prec (SLogAnd x y) = ppBinOp prec "&&" 1 1 x y
-  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (0::Int)
-  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e (0::Int)
+  pprPrec prec (RelExp LTH0 e) = ppBinOp prec "<" 2 2 e (0 :: Int)
+  pprPrec prec (RelExp LEQ0 e) = ppBinOp prec "<=" 2 2 e (0 :: Int)
   pprPrec _ (MaxMin True es) = text "min" <> parens (commasep $ map ppr es)
   pprPrec _ (MaxMin False es) = text "max" <> parens (commasep $ map ppr es)
 
 ppBinOp :: (Pretty a, Pretty b) => Int -> String -> Int -> Int -> a -> b -> Doc
 ppBinOp p bop precedence rprecedence x y =
   parensIf (p > precedence) $
-           pprPrec precedence x <+/>
-           text bop <+>
-           pprPrec rprecedence y
+    pprPrec precedence x
+      <+/> text bop
+      <+> pprPrec rprecedence y
 
 instance Substitute ScalExp where
   substituteNames subst e =
-    case e of Id v t -> Id (substituteNames subst v) t
-              Val v -> Val v
-              SNeg x -> SNeg $ substituteNames subst x
-              SNot x -> SNot $ substituteNames subst x
-              SAbs x -> SAbs $ substituteNames subst x
-              SSignum x -> SSignum $ substituteNames subst x
-              SPlus x y -> substituteNames subst x `SPlus` substituteNames subst y
-              SMinus x y -> substituteNames subst x `SMinus` substituteNames subst y
-              SPow x y -> substituteNames subst x `SPow` substituteNames subst y
-              STimes x y -> substituteNames subst x `STimes` substituteNames subst y
-              SDiv x y -> substituteNames subst x `SDiv` substituteNames subst y
-              SMod x y -> substituteNames subst x `SMod` substituteNames subst y
-              SQuot x y -> substituteNames subst x `SDiv` substituteNames subst y
-              SRem x y -> substituteNames subst x `SRem` substituteNames subst y
-              MaxMin m es -> MaxMin m $ map (substituteNames subst) es
-              RelExp r x -> RelExp r $ substituteNames subst x
-              SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
-              SLogOr x y -> substituteNames subst x `SLogOr` substituteNames subst y
+    case e of
+      Id v t -> Id (substituteNames subst v) t
+      Val v -> Val v
+      SNeg x -> SNeg $ substituteNames subst x
+      SNot x -> SNot $ substituteNames subst x
+      SAbs x -> SAbs $ substituteNames subst x
+      SSignum x -> SSignum $ substituteNames subst x
+      SPlus x y -> substituteNames subst x `SPlus` substituteNames subst y
+      SMinus x y -> substituteNames subst x `SMinus` substituteNames subst y
+      SPow x y -> substituteNames subst x `SPow` substituteNames subst y
+      STimes x y -> substituteNames subst x `STimes` substituteNames subst y
+      SDiv x y -> substituteNames subst x `SDiv` substituteNames subst y
+      SMod x y -> substituteNames subst x `SMod` substituteNames subst y
+      SQuot x y -> substituteNames subst x `SDiv` substituteNames subst y
+      SRem x y -> substituteNames subst x `SRem` substituteNames subst y
+      MaxMin m es -> MaxMin m $ map (substituteNames subst) es
+      RelExp r x -> RelExp r $ substituteNames subst x
+      SLogAnd x y -> substituteNames subst x `SLogAnd` substituteNames subst y
+      SLogOr x y -> substituteNames subst x `SLogOr` substituteNames subst y
 
 instance Rename ScalExp where
   rename = substituteRename
@@ -136,43 +139,43 @@ instance Rename ScalExp where
 scalExpType :: ScalExp -> PrimType
 scalExpType (Val v) = primValueType v
 scalExpType (Id _ t) = t
-scalExpType (SNeg    e) = scalExpType e
-scalExpType (SNot    _) = Bool
-scalExpType (SAbs    e) = scalExpType e
+scalExpType (SNeg e) = scalExpType e
+scalExpType (SNot _) = Bool
+scalExpType (SAbs e) = scalExpType e
 scalExpType (SSignum e) = scalExpType e
-scalExpType (SPlus   e _) = scalExpType e
-scalExpType (SMinus  e _) = scalExpType e
-scalExpType (STimes  e _) = scalExpType e
+scalExpType (SPlus e _) = scalExpType e
+scalExpType (SMinus e _) = scalExpType e
+scalExpType (STimes e _) = scalExpType e
 scalExpType (SDiv e _) = scalExpType e
-scalExpType (SMod e _)    = scalExpType e
+scalExpType (SMod e _) = scalExpType e
 scalExpType (SPow e _) = scalExpType e
 scalExpType (SQuot e _) = scalExpType e
 scalExpType (SRem e _) = scalExpType e
 scalExpType (SLogAnd _ _) = Bool
-scalExpType (SLogOr  _ _) = Bool
-scalExpType (RelExp  _ _) = Bool
+scalExpType (SLogOr _ _) = Bool
+scalExpType (RelExp _ _) = Bool
 scalExpType (MaxMin _ []) = IntType Int32 -- arbitrary and probably wrong.
-scalExpType (MaxMin _ (e:_)) = scalExpType e
+scalExpType (MaxMin _ (e : _)) = scalExpType e
 
 -- | Number of nodes in the scalar expression.
 scalExpSize :: ScalExp -> Int
-scalExpSize Val{} = 1
-scalExpSize Id{} = 1
-scalExpSize (SNeg    e) = scalExpSize e
-scalExpSize (SNot    e) = scalExpSize e
-scalExpSize (SAbs    e) = scalExpSize e
+scalExpSize Val {} = 1
+scalExpSize Id {} = 1
+scalExpSize (SNeg e) = scalExpSize e
+scalExpSize (SNot e) = scalExpSize e
+scalExpSize (SAbs e) = scalExpSize e
 scalExpSize (SSignum e) = scalExpSize e
-scalExpSize (SPlus   x y) = scalExpSize x + scalExpSize y
-scalExpSize (SMinus  x y) = scalExpSize x + scalExpSize y
-scalExpSize (STimes  x y) = scalExpSize x + scalExpSize y
+scalExpSize (SPlus x y) = scalExpSize x + scalExpSize y
+scalExpSize (SMinus x y) = scalExpSize x + scalExpSize y
+scalExpSize (STimes x y) = scalExpSize x + scalExpSize y
 scalExpSize (SDiv x y) = scalExpSize x + scalExpSize y
-scalExpSize (SMod x y)    = scalExpSize x + scalExpSize y
+scalExpSize (SMod x y) = scalExpSize x + scalExpSize y
 scalExpSize (SPow x y) = scalExpSize x + scalExpSize y
 scalExpSize (SQuot x y) = scalExpSize x + scalExpSize y
 scalExpSize (SRem x y) = scalExpSize x + scalExpSize y
 scalExpSize (SLogAnd x y) = scalExpSize x + scalExpSize y
-scalExpSize (SLogOr  x y) = scalExpSize x + scalExpSize y
-scalExpSize (RelExp  _ x) = scalExpSize x
+scalExpSize (SLogOr x y) = scalExpSize x + scalExpSize y
+scalExpSize (RelExp _ x) = scalExpSize x
 scalExpSize (MaxMin _ []) = 0
 scalExpSize (MaxMin _ es) = sum $ map scalExpSize es
 
@@ -183,19 +186,23 @@ type LookupVar = VName -> Maybe ScalExp
 -- | Non-recursively convert a subexpression to a 'ScalExp'.  The
 -- (scalar) type of the subexpression must be given in advance.
 subExpToScalExp :: SubExp -> PrimType -> ScalExp
-subExpToScalExp (Var v) t        = Id v t
+subExpToScalExp (Var v) t = Id v t
 subExpToScalExp (Constant val) _ = Val val
 
-toScalExp :: (HasScope t f, Monad f) =>
-             LookupVar -> Exp lore -> f (Maybe ScalExp)
+toScalExp ::
+  (HasScope t f, Monad f) =>
+  LookupVar ->
+  Exp lore ->
+  f (Maybe ScalExp)
 toScalExp look (BasicOp (SubExp (Var v)))
   | Just se <- look v =
     return $ Just se
   | otherwise = do
     t <- lookupType v
     case t of
-      Prim bt | typeIsOK bt ->
-        return $ Just $ Id v bt
+      Prim bt
+        | typeIsOK bt ->
+          return $ Just $ Id v bt
       _ ->
         return Nothing
 toScalExp _ (BasicOp (SubExp (Constant val)))
@@ -207,39 +214,45 @@ toScalExp look (BasicOp (CmpOp (CmpSle _) x y)) =
   Just . RelExp LEQ0 <$> (sminus <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp look (BasicOp (CmpOp (CmpEq t) x y))
   | typeIsOK t = do
-  x' <- subExpToScalExp' look x
-  y' <- subExpToScalExp' look y
-  return $ Just $ case t of
-    Bool ->
-      SLogAnd x' y' `SLogOr` SLogAnd (SNot x') (SNot y')
-    _ ->
-      RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
+    x' <- subExpToScalExp' look x
+    y' <- subExpToScalExp' look y
+    return $ Just $ case t of
+      Bool ->
+        SLogAnd x' y' `SLogOr` SLogAnd (SNot x') (SNot y')
+      _ ->
+        RelExp LEQ0 (x' `sminus` y') `SLogAnd` RelExp LEQ0 (y' `sminus` x')
 toScalExp look (BasicOp (BinOp (Sub t) (Constant x) y))
-  | typeIsOK $ IntType t, zeroIsh x =
-  Just . SNeg <$> subExpToScalExp' look y
+  | typeIsOK $ IntType t,
+    zeroIsh x =
+    Just . SNeg <$> subExpToScalExp' look y
 toScalExp look (BasicOp (UnOp AST.Not e)) =
   Just . SNot <$> subExpToScalExp' look e
 toScalExp look (BasicOp (BinOp bop x y))
   | Just f <- binOpScalExp bop =
-  Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
-
+    Just <$> (f <$> subExpToScalExp' look x <*> subExpToScalExp' look y)
 toScalExp _ _ = return Nothing
 
 typeIsOK :: PrimType -> Bool
 typeIsOK = (`elem` Bool : map IntType allIntTypes)
 
-subExpToScalExp' :: HasScope t f =>
-                    LookupVar -> SubExp -> f ScalExp
+subExpToScalExp' ::
+  HasScope t f =>
+  LookupVar ->
+  SubExp ->
+  f ScalExp
 subExpToScalExp' look (Var v)
   | Just se <- look v =
     pure se
   | otherwise =
     withType <$> lookupType v
-    where withType (Prim t) =
-            subExpToScalExp (Var v) t
-          withType t =
-            error $ "Cannot create ScalExp from variable " ++ pretty v ++
-            " of type " ++ pretty t
+  where
+    withType (Prim t) =
+      subExpToScalExp (Var v) t
+    withType t =
+      error $
+        "Cannot create ScalExp from variable " ++ pretty v
+          ++ " of type "
+          ++ pretty t
 subExpToScalExp' _ (Constant val) =
   pure $ Val val
 
@@ -272,26 +285,29 @@ sminus :: ScalExp -> ScalExp -> ScalExp
 sminus x (Val v) | zeroIsh v = x
 sminus x y = x `SMinus` y
 
- -- XXX: Only integers and booleans, OK?
+-- XXX: Only integers and booleans, OK?
 binOpScalExp :: BinOp -> Maybe (ScalExp -> ScalExp -> ScalExp)
-binOpScalExp bop = fmap snd . find ((==bop) . fst) $
-                   concatMap intOps allIntTypes ++
-                   [ (LogAnd, SLogAnd), (LogOr, SLogOr) ]
-  where intOps t = [ (Add t, SPlus)
-                   , (Sub t, SMinus)
-                   , (Mul t, STimes)
-                   , (AST.SDiv t, SDiv)
-                   , (AST.Pow t, SPow)
-                   , (AST.SMax t, \x y -> MaxMin False [x,y])
-                   , (AST.SMin t, \x y -> MaxMin True [x,y])
-                   ]
+binOpScalExp bop =
+  fmap snd . find ((== bop) . fst) $
+    concatMap intOps allIntTypes
+      ++ [(LogAnd, SLogAnd), (LogOr, SLogOr)]
+  where
+    intOps t =
+      [ (Add t, SPlus),
+        (Sub t, SMinus),
+        (Mul t, STimes),
+        (AST.SDiv t, SDiv),
+        (AST.Pow t, SPow),
+        (AST.SMax t, \x y -> MaxMin False [x, y]),
+        (AST.SMin t, \x y -> MaxMin True [x, y])
+      ]
 
 instance FreeIn ScalExp where
-  freeIn' (Val   _) = mempty
+  freeIn' (Val _) = mempty
   freeIn' (Id i _) = fvName i
-  freeIn' (SNeg  e) = freeIn' e
-  freeIn' (SNot  e) = freeIn' e
-  freeIn' (SAbs  e) = freeIn' e
+  freeIn' (SNeg e) = freeIn' e
+  freeIn' (SNot e) = freeIn' e
+  freeIn' (SAbs e) = freeIn' e
   freeIn' (SSignum e) = freeIn' e
   freeIn' (SPlus x y) = freeIn' x <> freeIn' y
   freeIn' (SMinus x y) = freeIn' x <> freeIn' y
@@ -301,8 +317,8 @@ instance FreeIn ScalExp where
   freeIn' (SMod x y) = freeIn' x <> freeIn' y
   freeIn' (SQuot x y) = freeIn' x <> freeIn' y
   freeIn' (SRem x y) = freeIn' x <> freeIn' y
-  freeIn' (SLogOr x y)  = freeIn' x <> freeIn' y
+  freeIn' (SLogOr x y) = freeIn' x <> freeIn' y
   freeIn' (SLogAnd x y) = freeIn' x <> freeIn' y
   freeIn' (RelExp LTH0 e) = freeIn' e
   freeIn' (RelExp LEQ0 e) = freeIn' e
-  freeIn' (MaxMin _  es) = freeIn' es
+  freeIn' (MaxMin _ es) = freeIn' es

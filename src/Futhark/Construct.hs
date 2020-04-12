@@ -1,83 +1,83 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
+
 module Futhark.Construct
-  ( letSubExp
-  , letSubExps
-  , letExp
-  , letTupExp
-  , letTupExp'
-  , letInPlace
+  ( letSubExp,
+    letSubExps,
+    letExp,
+    letTupExp,
+    letTupExp',
+    letInPlace,
+    eSubExp,
+    eIf,
+    eIf',
+    eBinOp,
+    eCmpOp,
+    eConvOp,
+    eNot,
+    eSignum,
+    eCopy,
+    eAssert,
+    eBody,
+    eLambda,
+    eDivRoundingUp,
+    eRoundToMultipleOf,
+    eSliceArray,
+    eBlank,
+    eOutOfBounds,
+    eWriteArray,
+    asIntZ,
+    asIntS,
+    resultBody,
+    resultBodyM,
+    insertStmsM,
+    mapResult,
+    foldBinOp,
+    binOpLambda,
+    cmpOpLambda,
+    sliceDim,
+    fullSlice,
+    fullSliceNum,
+    isFullSlice,
+    sliceAt,
+    ifCommon,
+    module Futhark.Binder,
 
-  , eSubExp
-  , eIf
-  , eIf'
-  , eBinOp
-  , eCmpOp
-  , eConvOp
-  , eNot
-  , eSignum
-  , eCopy
-  , eAssert
-  , eBody
-  , eLambda
-  , eDivRoundingUp
-  , eRoundToMultipleOf
-  , eSliceArray
-  , eBlank
+    -- * Result types
+    instantiateShapes,
+    instantiateShapes',
+    removeExistentials,
 
-  , eOutOfBounds
-  , eWriteArray
-
-  , asIntZ, asIntS
-
-  , resultBody
-  , resultBodyM
-  , insertStmsM
-  , mapResult
-
-  , foldBinOp
-  , binOpLambda
-  , cmpOpLambda
-  , sliceDim
-  , fullSlice
-  , fullSliceNum
-  , isFullSlice
-  , sliceAt
-  , ifCommon
-
-  , module Futhark.Binder
-
-  -- * Result types
-  , instantiateShapes
-  , instantiateShapes'
-  , removeExistentials
-
-  -- * Convenience
-  , simpleMkLetNames
-
-  , ToExp(..)
+    -- * Convenience
+    simpleMkLetNames,
+    ToExp (..),
   )
 where
 
-import qualified Data.Map.Strict as M
-import Data.Loc (SrcLoc)
-import Data.List (sortOn)
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-
-import Futhark.Representation.AST
-import Futhark.MonadFreshNames
+import Data.List (sortOn)
+import Data.Loc (SrcLoc)
+import qualified Data.Map.Strict as M
 import Futhark.Binder
+import Futhark.MonadFreshNames
+import Futhark.Representation.AST
 
-letSubExp :: MonadBinder m =>
-             String -> Exp (Lore m) -> m SubExp
+letSubExp ::
+  MonadBinder m =>
+  String ->
+  Exp (Lore m) ->
+  m SubExp
 letSubExp _ (BasicOp (SubExp se)) = return se
 letSubExp desc e = Var <$> letExp desc e
 
-letExp :: MonadBinder m =>
-          String -> Exp (Lore m) -> m VName
+letExp ::
+  MonadBinder m =>
+  String ->
+  Exp (Lore m) ->
+  m VName
 letExp _ (BasicOp (SubExp (Var v))) =
   return v
 letExp desc e = do
@@ -86,22 +86,31 @@ letExp desc e = do
   idents <- letBindNames vs e
   case idents of
     [ident] -> return $ identName ident
-    _       -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
+    _ -> error $ "letExp: tuple-typed expression given:\n" ++ pretty e
 
-letInPlace :: MonadBinder m =>
-              String -> VName -> Slice SubExp -> Exp (Lore m)
-           -> m VName
+letInPlace ::
+  MonadBinder m =>
+  String ->
+  VName ->
+  Slice SubExp ->
+  Exp (Lore m) ->
+  m VName
 letInPlace desc src slice e = do
   tmp <- letSubExp (desc ++ "_tmp") e
   letExp desc $ BasicOp $ Update src slice tmp
 
-letSubExps :: MonadBinder m =>
-              String -> [Exp (Lore m)] -> m [SubExp]
+letSubExps ::
+  MonadBinder m =>
+  String ->
+  [Exp (Lore m)] ->
+  m [SubExp]
 letSubExps desc = mapM $ letSubExp desc
 
-letTupExp :: (MonadBinder m) =>
-             String -> Exp (Lore m)
-          -> m [VName]
+letTupExp ::
+  (MonadBinder m) =>
+  String ->
+  Exp (Lore m) ->
+  m [VName]
 letTupExp _ (BasicOp (SubExp (Var v))) =
   return [v]
 letTupExp name e = do
@@ -109,26 +118,36 @@ letTupExp name e = do
   names <- replicateM numValues $ newVName name
   map identName <$> letBindNames names e
 
-letTupExp' :: (MonadBinder m) =>
-              String -> Exp (Lore m)
-           -> m [SubExp]
+letTupExp' ::
+  (MonadBinder m) =>
+  String ->
+  Exp (Lore m) ->
+  m [SubExp]
 letTupExp' _ (BasicOp (SubExp se)) = return [se]
 letTupExp' name ses = map Var <$> letTupExp name ses
 
-eSubExp :: MonadBinder m =>
-           SubExp -> m (Exp (Lore m))
+eSubExp ::
+  MonadBinder m =>
+  SubExp ->
+  m (Exp (Lore m))
 eSubExp = pure . BasicOp . SubExp
 
-eIf :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-       m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
-    -> m (Exp (Lore m))
+eIf ::
+  (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
+  m (Exp (Lore m)) ->
+  m (Body (Lore m)) ->
+  m (Body (Lore m)) ->
+  m (Exp (Lore m))
 eIf ce te fe = eIf' ce te fe IfNormal
 
 -- | As 'eIf', but an 'IfSort' can be given.
-eIf' :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-        m (Exp (Lore m)) -> m (Body (Lore m)) -> m (Body (Lore m))
-     -> IfSort
-     -> m (Exp (Lore m))
+eIf' ::
+  (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
+  m (Exp (Lore m)) ->
+  m (Body (Lore m)) ->
+  m (Body (Lore m)) ->
+  IfSort ->
+  m (Exp (Lore m))
 eIf' ce te fe if_sort = do
   ce' <- letSubExp "cond" =<< ce
   te' <- insertStmsM te
@@ -138,42 +157,58 @@ eIf' ce te fe if_sort = do
   te'' <- addContextForBranch ts te'
   fe'' <- addContextForBranch ts fe'
   return $ If ce' te'' fe'' $ IfAttr ts if_sort
-  where addContextForBranch ts (Body _ stms val_res) = do
-          body_ts <- extendedScope (traverse subExpType val_res) stmsscope
-          let ctx_res = map snd $ sortOn fst $
-                        M.toList $ shapeExtMapping ts body_ts
-          mkBodyM stms $ ctx_res++val_res
-            where stmsscope = scopeOf stms
+  where
+    addContextForBranch ts (Body _ stms val_res) = do
+      body_ts <- extendedScope (traverse subExpType val_res) stmsscope
+      let ctx_res =
+            map snd $ sortOn fst
+              $ M.toList
+              $ shapeExtMapping ts body_ts
+      mkBodyM stms $ ctx_res ++ val_res
+      where
+        stmsscope = scopeOf stms
 
-eBinOp :: MonadBinder m =>
-          BinOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
-       -> m (Exp (Lore m))
+eBinOp ::
+  MonadBinder m =>
+  BinOp ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eBinOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ BinOp op x' y'
 
-eCmpOp :: MonadBinder m =>
-          CmpOp -> m (Exp (Lore m)) -> m (Exp (Lore m))
-       -> m (Exp (Lore m))
+eCmpOp ::
+  MonadBinder m =>
+  CmpOp ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eCmpOp op x y = do
   x' <- letSubExp "x" =<< x
   y' <- letSubExp "y" =<< y
   return $ BasicOp $ CmpOp op x' y'
 
-eConvOp :: MonadBinder m =>
-           ConvOp -> m (Exp (Lore m))
-        -> m (Exp (Lore m))
+eConvOp ::
+  MonadBinder m =>
+  ConvOp ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eConvOp op x = do
   x' <- letSubExp "x" =<< x
   return $ BasicOp $ ConvOp op x'
 
-eNot :: MonadBinder m =>
-        m (Exp (Lore m)) -> m (Exp (Lore m))
+eNot ::
+  MonadBinder m =>
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eNot e = BasicOp . UnOp Not <$> (letSubExp "not_arg" =<< e)
 
-eSignum :: MonadBinder m =>
-        m (Exp (Lore m)) -> m (Exp (Lore m))
+eSignum ::
+  MonadBinder m =>
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eSignum em = do
   e <- em
   e' <- letSubExp "signum_arg" e
@@ -184,100 +219,140 @@ eSignum em = do
     _ ->
       error $ "eSignum: operand " ++ pretty e ++ " has invalid type."
 
-eCopy :: MonadBinder m =>
-         m (Exp (Lore m)) -> m (Exp (Lore m))
+eCopy ::
+  MonadBinder m =>
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eCopy e = BasicOp . Copy <$> (letExp "copy_arg" =<< e)
 
-eAssert :: MonadBinder m =>
-         m (Exp (Lore m)) -> ErrorMsg SubExp -> SrcLoc -> m (Exp (Lore m))
-eAssert e msg loc = do e' <- letSubExp "assert_arg" =<< e
-                       return $ BasicOp $ Assert e' msg (loc, mempty)
+eAssert ::
+  MonadBinder m =>
+  m (Exp (Lore m)) ->
+  ErrorMsg SubExp ->
+  SrcLoc ->
+  m (Exp (Lore m))
+eAssert e msg loc = do
+  e' <- letSubExp "assert_arg" =<< e
+  return $ BasicOp $ Assert e' msg (loc, mempty)
 
-eBody :: (MonadBinder m) =>
-         [m (Exp (Lore m))]
-      -> m (Body (Lore m))
+eBody ::
+  (MonadBinder m) =>
+  [m (Exp (Lore m))] ->
+  m (Body (Lore m))
 eBody es = insertStmsM $ do
-             es' <- sequence es
-             xs <- mapM (letTupExp "x") es'
-             mkBodyM mempty $ map Var $ concat xs
+  es' <- sequence es
+  xs <- mapM (letTupExp "x") es'
+  mkBodyM mempty $ map Var $ concat xs
 
-eLambda :: MonadBinder m =>
-           Lambda (Lore m) -> [m (Exp (Lore m))] -> m [SubExp]
-eLambda lam args = do zipWithM_ bindParam (lambdaParams lam) args
-                      bodyBind $ lambdaBody lam
-  where bindParam param arg = letBindNames_ [paramName param] =<< arg
+eLambda ::
+  MonadBinder m =>
+  Lambda (Lore m) ->
+  [m (Exp (Lore m))] ->
+  m [SubExp]
+eLambda lam args = do
+  zipWithM_ bindParam (lambdaParams lam) args
+  bodyBind $ lambdaBody lam
+  where
+    bindParam param arg = letBindNames_ [paramName param] =<< arg
 
 -- | Note: unsigned division.
-eDivRoundingUp :: MonadBinder m =>
-                  IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
+eDivRoundingUp ::
+  MonadBinder m =>
+  IntType ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eDivRoundingUp t x y =
   eBinOp (SQuot t) (eBinOp (Add t) x (eBinOp (Sub t) y (eSubExp one))) y
-  where one = intConst t 1
+  where
+    one = intConst t 1
 
-eRoundToMultipleOf :: MonadBinder m =>
-                      IntType -> m (Exp (Lore m)) -> m (Exp (Lore m)) -> m (Exp (Lore m))
+eRoundToMultipleOf ::
+  MonadBinder m =>
+  IntType ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eRoundToMultipleOf t x d =
   ePlus x (eMod (eMinus d (eMod x d)) d)
-  where eMod = eBinOp (SMod t)
-        eMinus = eBinOp (Sub t)
-        ePlus = eBinOp (Add t)
+  where
+    eMod = eBinOp (SMod t)
+    eMinus = eBinOp (Sub t)
+    ePlus = eBinOp (Add t)
 
 -- | Construct an 'Index' expressions that slices an array with unit stride.
-eSliceArray :: MonadBinder m =>
-               Int -> VName -> m (Exp (Lore m)) -> m (Exp (Lore m))
-            -> m (Exp (Lore m))
+eSliceArray ::
+  MonadBinder m =>
+  Int ->
+  VName ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eSliceArray d arr i n = do
   arr_t <- lookupType arr
-  let skips = map (slice (constant (0::Int32))) $ take d $ arrayDims arr_t
+  let skips = map (slice (constant (0 :: Int32))) $ take d $ arrayDims arr_t
   i' <- letSubExp "slice_i" =<< i
   n' <- letSubExp "slice_n" =<< n
   return $ BasicOp $ Index arr $ fullSlice arr_t $ skips ++ [slice i' n']
-  where slice j m = DimSlice j m (constant (1::Int32))
+  where
+    slice j m = DimSlice j m (constant (1 :: Int32))
 
 -- | Are these indexes out-of-bounds for the array?
-eOutOfBounds :: MonadBinder m =>
-                VName -> [m (Exp (Lore m))] -> m (Exp (Lore m))
+eOutOfBounds ::
+  MonadBinder m =>
+  VName ->
+  [m (Exp (Lore m))] ->
+  m (Exp (Lore m))
 eOutOfBounds arr is = do
   arr_t <- lookupType arr
   let ws = arrayDims arr_t
   is' <- mapM (letSubExp "write_i") =<< sequence is
   let checkDim w i = do
-        less_than_zero <- letSubExp "less_than_zero" $
-          BasicOp $ CmpOp (CmpSlt Int32) i (constant (0::Int32))
-        greater_than_size <- letSubExp "greater_than_size" $
-          BasicOp $ CmpOp (CmpSle Int32) w i
-        letSubExp "outside_bounds_dim" $
-          BasicOp $ BinOp LogOr less_than_zero greater_than_size
+        less_than_zero <-
+          letSubExp "less_than_zero"
+            $ BasicOp
+            $ CmpOp (CmpSlt Int32) i (constant (0 :: Int32))
+        greater_than_size <-
+          letSubExp "greater_than_size"
+            $ BasicOp
+            $ CmpOp (CmpSle Int32) w i
+        letSubExp "outside_bounds_dim"
+          $ BasicOp
+          $ BinOp LogOr less_than_zero greater_than_size
   foldBinOp LogOr (constant False) =<< zipWithM checkDim ws is'
 
 -- | Write to an index of the array, if within bounds.  Otherwise,
 -- nothing.  Produces the updated array.
-eWriteArray :: (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
-               VName -> [m (Exp (Lore m))] -> m (Exp (Lore m))
-            -> m (Exp (Lore m))
+eWriteArray ::
+  (MonadBinder m, BranchType (Lore m) ~ ExtType) =>
+  VName ->
+  [m (Exp (Lore m))] ->
+  m (Exp (Lore m)) ->
+  m (Exp (Lore m))
 eWriteArray arr is v = do
   arr_t <- lookupType arr
   is' <- mapM (letSubExp "write_i") =<< sequence is
   v' <- letSubExp "write_v" =<< v
-
   outside_bounds <- letSubExp "outside_bounds" =<< eOutOfBounds arr is
-
   outside_bounds_branch <- insertStmsM $ resultBodyM [Var arr]
-
   in_bounds_branch <- insertStmsM $ do
-    res <- letInPlace "write_out_inside_bounds" arr
-           (fullSlice arr_t (map DimFix is')) $ BasicOp $ SubExp v'
+    res <-
+      letInPlace
+        "write_out_inside_bounds"
+        arr
+        (fullSlice arr_t (map DimFix is'))
+        $ BasicOp
+        $ SubExp v'
     resultBodyM [Var res]
-
-  return $
-    If outside_bounds outside_bounds_branch in_bounds_branch $
-    ifCommon [arr_t]
+  return
+    $ If outside_bounds outside_bounds_branch in_bounds_branch
+    $ ifCommon [arr_t]
 
 -- | Construct an unspecified value of the given type.
 eBlank :: MonadBinder m => Type -> m (Exp (Lore m))
 eBlank (Prim t) = return $ BasicOp $ SubExp $ Constant $ blankPrimValue t
 eBlank (Array pt shape _) = return $ BasicOp $ Scratch pt $ shapeDims shape
-eBlank Mem{} = error "eBlank: cannot create blank memory"
+eBlank Mem {} = error "eBlank: cannot create blank memory"
 
 -- | Sign-extend to the given integer type.
 asIntS :: MonadBinder m => IntType -> SubExp -> m SubExp
@@ -287,8 +362,12 @@ asIntS = asInt SExt
 asIntZ :: MonadBinder m => IntType -> SubExp -> m SubExp
 asIntZ = asInt ZExt
 
-asInt :: MonadBinder m =>
-         (IntType -> IntType -> ConvOp) -> IntType -> SubExp -> m SubExp
+asInt ::
+  MonadBinder m =>
+  (IntType -> IntType -> ConvOp) ->
+  IntType ->
+  SubExp ->
+  m SubExp
 asInt ext to_it e = do
   e_t <- subExpType e
   case e_t of
@@ -296,50 +375,67 @@ asInt ext to_it e = do
       | to_it == from_it -> return e
       | otherwise -> letSubExp s $ BasicOp $ ConvOp (ext from_it to_it) e
     _ -> error "asInt: wrong type"
-  where s = case e of Var v -> baseString v
-                      _     -> "to_" ++ pretty to_it
-
+  where
+    s = case e of
+      Var v -> baseString v
+      _ -> "to_" ++ pretty to_it
 
 -- | Apply a binary operator to several subexpressions.  A left-fold.
-foldBinOp :: MonadBinder m =>
-             BinOp -> SubExp -> [SubExp] -> m (Exp (Lore m))
+foldBinOp ::
+  MonadBinder m =>
+  BinOp ->
+  SubExp ->
+  [SubExp] ->
+  m (Exp (Lore m))
 foldBinOp _ ne [] =
   return $ BasicOp $ SubExp ne
-foldBinOp bop ne (e:es) =
+foldBinOp bop ne (e : es) =
   eBinOp bop (pure $ BasicOp $ SubExp e) (foldBinOp bop ne es)
 
 -- | Create a two-parameter lambda whose body applies the given binary
 -- operation to its arguments.  It is assumed that both argument and
 -- result types are the same.  (This assumption should be fixed at
 -- some point.)
-binOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
-               BinOp -> PrimType -> m (Lambda (Lore m))
+binOpLambda ::
+  (MonadBinder m, Bindable (Lore m)) =>
+  BinOp ->
+  PrimType ->
+  m (Lambda (Lore m))
 binOpLambda bop t = binLambda (BinOp bop) t t
 
 -- | As 'binOpLambda', but for 'CmpOp's.
-cmpOpLambda :: (MonadBinder m, Bindable (Lore m)) =>
-               CmpOp -> PrimType -> m (Lambda (Lore m))
+cmpOpLambda ::
+  (MonadBinder m, Bindable (Lore m)) =>
+  CmpOp ->
+  PrimType ->
+  m (Lambda (Lore m))
 cmpOpLambda cop t = binLambda (CmpOp cop) t Bool
 
-binLambda :: (MonadBinder m, Bindable (Lore m)) =>
-             (SubExp -> SubExp -> BasicOp (Lore m)) -> PrimType -> PrimType
-          -> m (Lambda (Lore m))
+binLambda ::
+  (MonadBinder m, Bindable (Lore m)) =>
+  (SubExp -> SubExp -> BasicOp (Lore m)) ->
+  PrimType ->
+  PrimType ->
+  m (Lambda (Lore m))
 binLambda bop arg_t ret_t = do
-  x   <- newVName "x"
-  y   <- newVName "y"
+  x <- newVName "x"
+  y <- newVName "y"
   body <- insertStmsM $ do
     res <- letSubExp "binlam_res" $ BasicOp $ bop (Var x) (Var y)
     return $ resultBody [res]
-  return Lambda {
-             lambdaParams     = [Param x (Prim arg_t),
-                                 Param y (Prim arg_t)]
-           , lambdaReturnType = [Prim ret_t]
-           , lambdaBody       = body
-           }
+  return
+    Lambda
+      { lambdaParams =
+          [ Param x (Prim arg_t),
+            Param y (Prim arg_t)
+          ],
+        lambdaReturnType = [Prim ret_t],
+        lambdaBody = body
+      }
 
 -- | Slice a full dimension of the given size.
 sliceDim :: SubExp -> DimIndex SubExp
-sliceDim d = DimSlice (constant (0::Int32)) d (constant (1::Int32))
+sliceDim d = DimSlice (constant (0 :: Int32)) d (constant (1 :: Int32))
 
 -- | @fullSlice t slice@ returns @slice@, but with 'DimSlice's of
 -- entire dimensions appended to the full dimensionality of @t@.  This
@@ -366,9 +462,10 @@ fullSliceNum dims slice =
 -- dimension, but also one that fixes all unit dimensions.
 isFullSlice :: Shape -> Slice SubExp -> Bool
 isFullSlice shape slice = and $ zipWith allOfIt (shapeDims shape) slice
-  where allOfIt (Constant v) DimFix{} = oneIsh v
-        allOfIt d (DimSlice _ n _) = d == n
-        allOfIt _ _ = False
+  where
+    allOfIt (Constant v) DimFix {} = oneIsh v
+    allOfIt d (DimSlice _ n _) = d == n
+    allOfIt _ _ = False
 
 ifCommon :: [Type] -> IfAttr ExtType
 ifCommon ts = IfAttr (staticShapes ts) IfNormal
@@ -379,75 +476,96 @@ resultBody = mkBody mempty
 
 -- | Conveniently construct a body that contains no bindings - but
 -- this time, monadically!
-resultBodyM :: MonadBinder m =>
-               [SubExp]
-            -> m (Body (Lore m))
+resultBodyM ::
+  MonadBinder m =>
+  [SubExp] ->
+  m (Body (Lore m))
 resultBodyM = mkBodyM mempty
 
 -- | Evaluate the action, producing a body, then wrap it in all the
 -- bindings it created using 'addStm'.
-insertStmsM :: (MonadBinder m) =>
-               m (Body (Lore m)) -> m (Body (Lore m))
+insertStmsM ::
+  (MonadBinder m) =>
+  m (Body (Lore m)) ->
+  m (Body (Lore m))
 insertStmsM m = do
   (Body _ bnds res, otherbnds) <- collectStms m
   mkBodyM (otherbnds <> bnds) res
 
 -- | Change that result where evaluation of the body would stop.  Also
 -- change type annotations at branches.
-mapResult :: Bindable lore =>
-             (Result -> Body lore) -> Body lore -> Body lore
+mapResult ::
+  Bindable lore =>
+  (Result -> Body lore) ->
+  Body lore ->
+  Body lore
 mapResult f (Body _ bnds res) =
   let Body _ bnds2 newres = f res
-  in mkBody (bnds<>bnds2) newres
+   in mkBody (bnds <> bnds2) newres
 
 -- | Instantiate all existential parts dimensions of the given
 -- type, using a monadic action to create the necessary 'SubExp's.
 -- You should call this function within some monad that allows you to
 -- collect the actions performed (say, 'Writer').
-instantiateShapes :: Monad m =>
-                     (Int -> m SubExp)
-                  -> [TypeBase ExtShape u]
-                  -> m [TypeBase Shape u]
+instantiateShapes ::
+  Monad m =>
+  (Int -> m SubExp) ->
+  [TypeBase ExtShape u] ->
+  m [TypeBase Shape u]
 instantiateShapes f ts = evalStateT (mapM instantiate ts) M.empty
-  where instantiate t = do
-          shape <- mapM instantiate' $ shapeDims $ arrayShape t
-          return $ t `setArrayShape` Shape shape
-        instantiate' (Ext x) = do
-          m <- get
-          case M.lookup x m of
-            Just se -> return se
-            Nothing -> do se <- lift $ f x
-                          put $ M.insert x se m
-                          return se
-        instantiate' (Free se) = return se
+  where
+    instantiate t = do
+      shape <- mapM instantiate' $ shapeDims $ arrayShape t
+      return $ t `setArrayShape` Shape shape
+    instantiate' (Ext x) = do
+      m <- get
+      case M.lookup x m of
+        Just se -> return se
+        Nothing -> do
+          se <- lift $ f x
+          put $ M.insert x se m
+          return se
+    instantiate' (Free se) = return se
 
-instantiateShapes' :: MonadFreshNames m =>
-                      [TypeBase ExtShape u]
-                   -> m ([TypeBase Shape u], [Ident])
+instantiateShapes' ::
+  MonadFreshNames m =>
+  [TypeBase ExtShape u] ->
+  m ([TypeBase Shape u], [Ident])
 instantiateShapes' ts =
   runWriterT $ instantiateShapes instantiate ts
-  where instantiate _ = do v <- lift $ newIdent "size" $ Prim int32
-                           tell [v]
-                           return $ Var $ identName v
+  where
+    instantiate _ = do
+      v <- lift $ newIdent "size" $ Prim int32
+      tell [v]
+      return $ Var $ identName v
 
 removeExistentials :: ExtType -> Type -> Type
 removeExistentials t1 t2 =
-  t1 `setArrayDims`
-  zipWith nonExistential
-  (shapeDims $ arrayShape t1)
-  (arrayDims t2)
-  where nonExistential (Ext _)    dim = dim
-        nonExistential (Free dim) _   = dim
+  t1
+    `setArrayDims` zipWith
+      nonExistential
+      (shapeDims $ arrayShape t1)
+      (arrayDims t2)
+  where
+    nonExistential (Ext _) dim = dim
+    nonExistential (Free dim) _ = dim
 
 -- | Can be used as the definition of 'mkLetNames' for a 'Bindable'
 -- instance for simple representations.
-simpleMkLetNames :: (ExpAttr lore ~ (), LetAttr lore ~ Type,
-                     MonadFreshNames m, TypedOp (Op lore), HasScope lore m) =>
-                    [VName] -> Exp lore -> m (Stm lore)
+simpleMkLetNames ::
+  ( ExpAttr lore ~ (),
+    LetAttr lore ~ Type,
+    MonadFreshNames m,
+    TypedOp (Op lore),
+    HasScope lore m
+  ) =>
+  [VName] ->
+  Exp lore ->
+  m (Stm lore)
 simpleMkLetNames names e = do
   et <- expExtType e
   (ts, shapes) <- instantiateShapes' et
-  let shapeElems = [ PatElem shape shapet | Ident shape shapet <- shapes ]
+  let shapeElems = [PatElem shape shapet | Ident shape shapet <- shapes]
   let valElems = zipWith PatElem names ts
   return $ Let (Pattern shapeElems valElems) (StmAux mempty ()) e
 
